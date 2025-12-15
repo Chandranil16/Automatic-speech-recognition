@@ -1,6 +1,7 @@
 const transcribe_audio = require('../services/ai_whisper');
 const fs = require('fs');
 const path = require('path');
+const speechAnalytics = require('../services/speech_analytics');
 
 const validateFile = (file) => {
   if (!file) {
@@ -55,20 +56,29 @@ const transcribe_upload_file = async (req, res, next) => {
       originalname: req.file.originalname
     });
 
-    const text = await transcribe_audio(filePath);
+    // Get transcription with metadata
+    const result = await transcribe_audio(filePath);
+    const text = typeof result === 'string' ? result : result.text;
+    const metadata = typeof result === 'object' ? result : {};
     
     if (!text || text.trim().length === 0) {
       throw new Error('No transcription text returned - audio may be silent or unclear');
     }
 
+    // Calculate analytics
+    const analytics = speechAnalytics.analyzeTranscription(text, metadata);
+
+
     cleanupFile(filePath);
     
     res.json({ 
       text,
+      analytics,
       metadata: {
         fileSize: req.file.size,
-        duration: null, // Could be enhanced to include duration
-        language: 'auto-detected'
+        fileName: req.file.originalname,
+        duration: null,
+        language: metadata.language_code || 'auto-detected'
       }
     });
     
@@ -97,45 +107,34 @@ const transcribe_stream = async (req, res, next) => {
     validateFile(req.file);
     filePath = req.file.path;
 
-    console.log('Processing stream transcription:', {
-      path: filePath,
-      size: req.file.size,
-      mimetype: req.file.mimetype,
-      originalname: req.file.originalname,
-      clientMimeType: req.body.mimeType,
-      clientSize: req.body.size
-    });
+    console.log('Processing stream transcription:', filePath);
 
-    const text = await transcribe_audio(filePath);
+    const result = await transcribe_audio(filePath);
+    const text = typeof result === 'string' ? result : result.text;
+    const metadata = typeof result === 'object' ? result : {};
     
     if (!text || text.trim().length === 0) {
-      throw new Error('No transcription text returned - audio may be silent or unclear');
+      throw new Error('No transcription text returned');
     }
+
+    // Calculate analytics
+    const analytics = speechAnalytics.analyzeTranscription(text, metadata);
 
     cleanupFile(filePath);
     
     res.json({ 
       text,
+      analytics,
       metadata: {
-        fileSize: req.file.size,
-        originalMimeType: req.body.mimeType,
-        processedAs: req.file.mimetype
+        language: metadata.language_code || 'auto-detected'
       }
     });
     
   } catch (error) {
-    console.error('Error during stream transcription:', error);
+    console.error('Stream transcription error:', error);
     cleanupFile(filePath);
-    
-    // Send more specific error messages
-    const errorMessage = error.message.includes('AssemblyAI') 
-      ? 'Transcription service error - please try again'
-      : error.message.includes('file') 
-        ? 'Audio processing error - please try recording again'
-        : 'Transcription failed - please speak more clearly and try again';
-    
     res.status(500).json({ 
-      error: errorMessage,
+      error: 'Stream transcription failed',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

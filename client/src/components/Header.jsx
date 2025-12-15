@@ -22,8 +22,8 @@ const Header = ({ activeTab, setActiveTab, setTranscription }) => {
         </div>
         
         {/* Main Title */}
-        <h1 className="text-5xl md:text-7xl font-bold gradient-text mb-4 tracking-tight">
-          VoiceFlow AI
+        <h1 className="text-5xl md:text-6xl font-bold gradient-text mb-4 tracking-tight">
+          Automatic Speech Recognition
         </h1>
         
         {/* Description */}

@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import axios from 'axios'
 import API_BASE_URL from '../config/api'
 
-const FileUpload = ({ setTranscription, loading, setLoading }) => {
+const FileUpload = ({ setTranscription, setAnalytics, loading, setLoading }) => {
   const [file, setFile] = useState(null)
   const [error, setError] = useState('')
   const [dragActive, setDragActive] = useState(false)
@@ -59,6 +59,9 @@ const FileUpload = ({ setTranscription, loading, setLoading }) => {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       setTranscription(response.data.text)
+      if (setAnalytics && response.data.analytics) {
+      setAnalytics(response.data.analytics)
+    }
     } catch (err) {
       setError(err.response?.data?.error || 'Error uploading file')
     } finally {

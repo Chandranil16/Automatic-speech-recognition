@@ -68,7 +68,9 @@ const transcribe_audio = async (filepath) => {
       language_code: transcript.language_code,
       confidence: transcript.confidence,
       text_length: transcript.text ? transcript.text.length : 0,
-      text_preview: transcript.text ? transcript.text.substring(0, 100) + "..." : "No text",
+      text_preview: transcript.text
+        ? transcript.text.substring(0, 100) + "..."
+        : "No text",
       error: transcript.error,
       language_detection: transcript.language_detection,
     });
@@ -76,7 +78,9 @@ const transcribe_audio = async (filepath) => {
     if (transcript.status === "completed" && transcript.text) {
       // Additional validation
       if (transcript.text.trim().length === 0) {
-        throw new Error("Transcription completed but returned empty text - audio may be silent");
+        throw new Error(
+          "Transcription completed but returned empty text - audio may be silent"
+        );
       }
 
       // Log language detection results if available
@@ -84,7 +88,12 @@ const transcribe_audio = async (filepath) => {
         console.log("Detected languages:", transcript.language_detection);
       }
 
-      return transcript.text.trim();
+      return {
+        text: transcript.text.trim(),
+        confidence: transcript.confidence,
+        language_code: transcript.language_code,
+        language_detection: transcript.language_detection,
+      };
     } else if (transcript.status === "error") {
       const errorMsg = transcript.error || "Unknown transcription error";
       console.error("AssemblyAI transcription error:", errorMsg);
@@ -107,7 +116,10 @@ const transcribe_audio = async (filepath) => {
       throw new Error("Transcription service configuration error");
     } else if (error.message.includes("file")) {
       throw new Error("Audio file processing error");
-    } else if (error.message.includes("network") || error.response?.status >= 500) {
+    } else if (
+      error.message.includes("network") ||
+      error.response?.status >= 500
+    ) {
       throw new Error("Transcription service temporarily unavailable");
     } else if (error.response?.status === 400) {
       throw new Error("Invalid audio format or corrupted file");

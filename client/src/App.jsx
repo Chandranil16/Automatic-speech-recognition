@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react'
 import FileUpload from './components/FileUpload_transcription'
 import LiveTranscription from './components/Live_transcription'
 import TranscriptionDisplay from './components/Display_transcription'
+import AnalyticsDashboard from './components/Analytics_dashboard'
 import Header from './components/Header'
 function App() {
   const [transcription, setTranscription] = useState('')
+  const [analytics, setAnalytics] = useState(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('upload')
   const [mounted, setMounted] = useState(false)
@@ -27,7 +29,7 @@ function App() {
           setActiveTab={setActiveTab}
           setTranscription={setTranscription}
         />
-        <div className="container mx-auto px-4 py-8 max-w-6xl">
+        <div className="container mx-auto px-4 py-8 max-w-7xl">
           <main className={`transition-all duration-700 ease-out ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
             <div className="glass neomorph rounded-3xl p-8 md:p-12 shadow-2xl border border-white/30">
               {/* Content Area */}
@@ -35,12 +37,14 @@ function App() {
                 {activeTab === 'upload' ? (
                   <FileUpload
                     setTranscription={setTranscription}
+                    setAnalytics={setAnalytics}
                     loading={loading}
                     setLoading={setLoading}
                   />
                 ) : (
                   <LiveTranscription
                     setTranscription={setTranscription}
+                    setAnalytics={setAnalytics}
                     loading={loading}
                     setLoading={setLoading}
                   />
@@ -48,6 +52,8 @@ function App() {
               </div>
               <TranscriptionDisplay transcription={transcription} loading={loading} />
             </div>
+            {/* Analytics Dashboard */}
+            {analytics && <AnalyticsDashboard analytics={analytics} />}
             {/* Features Section */}
             <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
