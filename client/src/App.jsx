@@ -58,7 +58,7 @@ function App() {
             <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
                 { icon: '🎯', title: 'High Accuracy', desc: 'State-of-the-art AI transcription' },
-                { icon: '🌍', title: 'Multi-language', desc: 'Supports multiple languages' },
+                { icon: '🌍', title: 'Protection', desc: 'Protects privacy and data' },
                 { icon: '⚡', title: 'Real-time', desc: 'Instant transcription results' }
               ].map((feature, index) => (
                 <div 

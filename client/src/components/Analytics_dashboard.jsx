@@ -1,43 +1,84 @@
 import React from 'react';
 
-const MetricCard = ({ title, score, grade, description, icon, color }) => {
-  const getProgressColor = (score) => {
-    if (score >= 80) return 'bg-green-500';
-    if (score >= 60) return 'bg-yellow-500';
-    return 'bg-red-500';
+const MetricCard = ({ title, score, grade, description, icon, color, breakdown }) => {
+  const getColorClass = () => {
+    if (score >= 80) return "from-green-500 to-emerald-500";
+    if (score >= 60) return "from-blue-500 to-cyan-500";
+    if (score >= 40) return "from-yellow-500 to-orange-500";
+    return "from-red-500 to-pink-500";
   };
 
   return (
-    <div className="bg-white/80 backdrop-blur rounded-2xl p-6 border border-white/30 hover:shadow-lg transition-all duration-300">
-      <div className="flex items-center justify-between mb-4">
+    <div className="glass neomorph rounded-2xl p-6 hover:shadow-xl transition-all duration-300">
+      <div className="flex items-start justify-between mb-4">
         <div className="flex items-center space-x-3">
-          <div className={`text-3xl ${color}`}>{icon}</div>
-          <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
-        </div>
-        <div className={`text-2xl font-bold px-3 py-1 rounded-lg ${
-          grade === 'A' ? 'bg-green-100 text-green-700' :
-          grade === 'B' ? 'bg-blue-100 text-blue-700' :
-          grade === 'C' ? 'bg-yellow-100 text-yellow-700' :
-          'bg-red-100 text-red-700'
-        }`}>
-          {grade}
+          <div className={`p-3 rounded-xl bg-gradient-to-br ${color} text-white`}>
+            {icon}
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-gray-600">{title}</h3>
+            <div className="flex items-baseline space-x-2 mt-1">
+              <span className="text-3xl font-bold text-gray-800">{score}%</span>
+              <span
+                className={`text-xs font-semibold px-2 py-1 rounded ${
+                  grade === "A+"
+                    ? "bg-green-100 text-green-700"
+                    : grade === "A" || grade === "B"
+                    ? "bg-blue-100 text-blue-700"
+                    : grade === "C"
+                    ? "bg-yellow-100 text-yellow-700"
+                    : "bg-red-100 text-red-700"
+                }`}
+              >
+                {grade}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
-      
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-3xl font-bold text-gray-800">{score}%</span>
-        </div>
-        
-        <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-          <div
-            className={`h-full ${getProgressColor(score)} transition-all duration-500 rounded-full`}
-            style={{ width: `${Math.min(score, 100)}%` }}
-          ></div>
-        </div>
-        
-        <p className="text-sm text-gray-600 mt-2">{description}</p>
+
+      {/* Progress Bar */}
+      <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
+        <div
+          className={`h-2 rounded-full bg-gradient-to-r ${getColorClass()} transition-all duration-500`}
+          style={{ width: `${Math.min(100, score)}%` }}
+        ></div>
       </div>
+
+      <p className="text-xs text-gray-600 leading-relaxed">{description}</p>
+
+      {/* NEW: Word-level breakdown for accuracy */}
+      {breakdown && (
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <div className="text-xs text-gray-700 font-medium mb-2">
+            Word Confidence Distribution:
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="flex justify-between">
+              <span className="text-green-600">● Excellent:</span>
+              <span className="font-semibold">{breakdown.excellentWords}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-blue-600">● Good:</span>
+              <span className="font-semibold">{breakdown.goodWords}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-yellow-600">● Fair:</span>
+              <span className="font-semibold">{breakdown.fairWords}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-red-600">● Poor:</span>
+              <span className="font-semibold">{breakdown.poorWords}</span>
+            </div>
+          </div>
+          
+          {breakdown.avgWordConfidence && (
+            <div className="mt-2 text-xs text-gray-600">
+              Average word confidence: <span className="font-semibold">{breakdown.avgWordConfidence}%</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -197,6 +238,54 @@ const StatisticsCard = ({ stats }) => {
   );
 };
 
+const QualityWarningBanner = ({ qualityMetrics }) => {
+  if (!qualityMetrics || qualityMetrics.qualityLevel === 'excellent') return null;
+  
+  const colorMap = {
+    poor: 'bg-red-50 border-red-300 text-red-800',
+    fair: 'bg-orange-50 border-orange-300 text-orange-800',
+    good: 'bg-yellow-50 border-yellow-300 text-yellow-800'
+  };
+  
+  const iconMap = {
+    poor: '⚠️',
+    fair: '⚡',
+    good: 'ℹ️'
+  };
+  
+  return (
+    <div className={`rounded-xl p-6 border-2 mb-6 ${colorMap[qualityMetrics.qualityLevel]}`}>
+      <div className="flex items-start space-x-4">
+        <span className="text-3xl">{iconMap[qualityMetrics.qualityLevel]}</span>
+        <div className="flex-1">
+          <h3 className="text-lg font-bold mb-2">
+            Transcription Quality: {qualityMetrics.qualityLevel.toUpperCase()}
+            <span className="ml-3 text-sm font-normal">
+              (Confidence: {Math.round(qualityMetrics.confidence * 100)}%)
+            </span>
+          </h3>
+          <p className="text-sm mb-3">{qualityMetrics.adjustmentReason}</p>
+          {qualityMetrics.issues && qualityMetrics.issues.length > 0 && (
+            <div className="mt-3">
+              <p className="text-sm font-semibold mb-2">Quality Issues Detected:</p>
+              <ul className="list-disc list-inside text-sm space-y-1">
+                {qualityMetrics.issues.map((issue, idx) => (
+                  <li key={idx}>{issue}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="mt-4 p-3 bg-white/50 rounded-lg">
+            <p className="text-sm font-medium">
+              💡 Tip: For better results, speak clearly, reduce background noise, and stay close to the microphone.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AnalyticsDashboard = ({ analytics }) => {
   if (!analytics) return null;
 
@@ -206,6 +295,11 @@ const AnalyticsDashboard = ({ analytics }) => {
         <h2 className="text-3xl font-bold gradient-text mb-2">Speech Analytics Dashboard</h2>
         <p className="text-gray-600">Comprehensive analysis of your speech patterns and quality</p>
       </div>
+
+      {/* NEW: Quality Warning Banner */}
+      {analytics.qualityMetrics && (
+        <QualityWarningBanner qualityMetrics={analytics.qualityMetrics} />
+      )}
 
       {/* Main Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">

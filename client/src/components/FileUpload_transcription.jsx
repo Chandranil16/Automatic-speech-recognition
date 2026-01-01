@@ -62,6 +62,7 @@ const FileUpload = ({ setTranscription, setAnalytics, loading, setLoading }) => 
       if (setAnalytics && response.data.analytics) {
       setAnalytics(response.data.analytics)
     }
+    
     } catch (err) {
       setError(err.response?.data?.error || 'Error uploading file')
     } finally {

@@ -107,14 +107,19 @@ const transcribe_stream = async (req, res, next) => {
     validateFile(req.file);
     filePath = req.file.path;
 
-    console.log('Processing stream transcription:', filePath);
+    console.log('🎬 Processing stream transcription:', {
+      path: filePath,
+      size: req.file.size,
+      sizeKB: Math.round(req.file.size / 1024),
+      mimetype: req.file.mimetype,
+    });
 
     const result = await transcribe_audio(filePath);
     const text = typeof result === 'string' ? result : result.text;
     const metadata = typeof result === 'object' ? result : {};
     
     if (!text || text.trim().length === 0) {
-      throw new Error('No transcription text returned');
+      throw new Error('No speech detected - audio may contain only music/noise');
     }
 
     // Calculate analytics
@@ -126,15 +131,33 @@ const transcribe_stream = async (req, res, next) => {
       text,
       analytics,
       metadata: {
-        language: metadata.language_code || 'auto-detected'
+        language: metadata.language_code || 'auto-detected',
+        duration: metadata.audio_duration,
+        confidence: metadata.confidence,
       }
     });
     
   } catch (error) {
-    console.error('Stream transcription error:', error);
+    console.error('❌ Stream transcription error:', error);
     cleanupFile(filePath);
+    
+    // More specific error messages for phone audio
+    let errorMessage = 'Transcription failed';
+    
+    if (error.message.includes('music') || error.message.includes('noise')) {
+      errorMessage = 'No clear speech detected. Try recording without background music/noise.';
+    } else if (error.message.includes('timeout')) {
+      errorMessage = 'Processing took too long. Try recording shorter clips.';
+    } else if (error.message.includes('format')) {
+      errorMessage = 'Audio format not supported. Try different recording method.';
+    } else if (error.message.includes('AssemblyAI')) {
+      errorMessage = 'Transcription service error. Please try again.';
+    } else {
+      errorMessage = error.message || 'Server error - please try again.';
+    }
+    
     res.status(500).json({ 
-      error: 'Stream transcription failed',
+      error: errorMessage,
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

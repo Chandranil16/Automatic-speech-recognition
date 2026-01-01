@@ -1,4 +1,4 @@
-const natural = require("natural"); // For NLP analysis
+const natural = require("natural");
 const Sentiment = require("sentiment");
 
 class SpeechAnalytics {
@@ -26,21 +26,114 @@ class SpeechAnalytics {
   }
 
   /**
-   * Calculate comprehensive speech analytics
+   * SAFE DIVISION HELPER - Prevents NaN and division by zero
+   */
+  safeDivide(numerator, denominator, defaultValue = 0) {
+    if (!denominator || denominator === 0 || !isFinite(denominator)) {
+      return defaultValue;
+    }
+    const result = numerator / denominator;
+    return isFinite(result) ? result : defaultValue;
+  }
+
+  /**
+   * Calculate comprehensive speech analytics WITH QUALITY ADJUSTMENT
    */
   analyzeTranscription(transcriptionText, audioMetadata = {}) {
+    // CRITICAL: Validate input first
+    if (!transcriptionText || typeof transcriptionText !== "string" || transcriptionText.trim().length === 0) {
+      return this.getEmptyAnalytics("No transcription text provided");
+    }
+
     const words = this.tokenizeWords(transcriptionText);
     const sentences = this.tokenizeSentences(transcriptionText);
 
+    // CRITICAL: Check for empty arrays
+    if (words.length === 0) {
+      return this.getEmptyAnalytics("No words detected in transcription");
+    }
+
+    // If no sentences detected, treat entire text as one sentence
+    if (sentences.length === 0) {
+      sentences.push(transcriptionText);
+    }
+
+    // CRITICAL: Assess transcription quality FIRST
+    const qualityMetrics = this.assessTranscriptionQuality(
+      transcriptionText,
+      words,
+      sentences,
+      audioMetadata
+    );
+
+    // Calculate base metrics (these should now be more realistic)
+    const baseAccuracy = this.calculateAccuracy(transcriptionText, audioMetadata);
+    const baseSpeechStrength = this.calculateSpeechStrength(words, sentences);
+    const baseClarity = this.calculateClarity(words, sentences, transcriptionText);
+    const baseFluency = this.calculateFluency(words, sentences, transcriptionText);
+    const fillerWords = this.detectFillerWords(transcriptionText);
+    const sentiment = this.analyzeSentiment(transcriptionText);
+    const tone = this.analyzeTone(transcriptionText);
+    const statistics = this.getStatistics(words, sentences, transcriptionText);
+
+    // Apply quality adjustment factor to all metrics
+    const qualityFactor = qualityMetrics.overallQualityFactor;
+
     return {
-      accuracy: this.calculateAccuracy(transcriptionText, audioMetadata),
-      speechStrength: this.calculateSpeechStrength(words, sentences),
-      clarity: this.calculateClarity(words, sentences, transcriptionText),
-      fluency: this.calculateFluency(words, sentences, transcriptionText),
-      fillerWords: this.detectFillerWords(transcriptionText),
-      sentiment: this.analyzeSentiment(transcriptionText),
-      tone: this.analyzeTone(transcriptionText),
-      statistics: this.getStatistics(words, sentences, transcriptionText),
+      accuracy: {
+        ...baseAccuracy,
+        score: Math.round(baseAccuracy.score * qualityFactor * 10) / 10,
+        originalScore: baseAccuracy.score,
+        adjustedBy: qualityMetrics.adjustmentReason,
+      },
+      speechStrength: {
+        ...baseSpeechStrength,
+        score: Math.round(baseSpeechStrength.score * qualityFactor * 10) / 10,
+        originalScore: baseSpeechStrength.score,
+        adjustedBy: qualityMetrics.adjustmentReason,
+      },
+      clarity: {
+        ...baseClarity,
+        score: Math.round(baseClarity.score * qualityFactor * 10) / 10,
+        originalScore: baseClarity.score,
+        adjustedBy: qualityMetrics.adjustmentReason,
+      },
+      fluency: {
+        ...baseFluency,
+        score: Math.round(baseFluency.score * qualityFactor * 10) / 10,
+        originalScore: baseFluency.score,
+        adjustedBy: qualityMetrics.adjustmentReason,
+      },
+      fillerWords,
+      sentiment,
+      tone,
+      statistics,
+      qualityMetrics,
+    };
+  }
+
+  /**
+   * Return analytics for empty/invalid transcriptions
+   */
+  getEmptyAnalytics(reason) {
+    return {
+      accuracy: { score: 0, grade: "F", description: reason },
+      speechStrength: { score: 0, grade: "F", description: reason, vocabularyRichness: 0 },
+      clarity: { score: 0, grade: "F", description: reason, readabilityLevel: "N/A", avgWordsPerSentence: 0 },
+      fluency: { score: 0, grade: "F", description: reason, fillerWordRatio: 0 },
+      fillerWords: { totalCount: 0, percentage: 0, breakdown: [], recommendation: reason },
+      sentiment: { score: 0, comparative: 0, label: "Neutral", positive: [], negative: [], emoji: "😐" },
+      tone: { primary: "neutral", scores: {}, rawScores: {}, description: reason },
+      statistics: { totalWords: 0, totalSentences: 0, totalCharacters: 0, uniqueWords: 0, avgWordLength: 0, avgSentenceLength: 0 },
+      qualityMetrics: {
+        overallQualityFactor: 0,
+        qualityLevel: "poor",
+        qualityScore: 0,
+        confidence: 0,
+        issues: [reason],
+        adjustmentReason: reason,
+        metricsReliability: "poor",
+      },
     };
   }
 
@@ -53,47 +146,142 @@ class SpeechAnalytics {
   }
 
   tokenizeSentences(text) {
-    const tokenizer = new natural.SentenceTokenizer();
-    return tokenizer.tokenize(text);
+    try {
+      const tokenizer = new natural.SentenceTokenizer();
+      const sentences = tokenizer.tokenize(text);
+
+      // Handle null or empty result
+      if (!sentences || sentences.length === 0) {
+        // Fallback: split by common sentence endings
+        const fallbackSentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 0);
+        return fallbackSentences.length > 0 ? fallbackSentences : [text];
+      }
+
+      return sentences;
+    } catch (error) {
+      console.error("Sentence tokenization error:", error);
+      return [text]; // Return entire text as one sentence
+    }
   }
 
   /**
-   * Calculate speech accuracy based on confidence and text quality
+   * Calculate speech accuracy - MORE REALISTIC SCORING
    */
   calculateAccuracy(text, metadata) {
-    let score = 85; // Base score
-
-    // Confidence from transcription API
-    if (metadata.confidence) {
-      score = metadata.confidence * 100;
-    } else {
-      // Estimate based on text quality
-      const hasProperCapitalization = /[A-Z]/.test(text);
-      const hasPunctuation = /[.,!?;:]/.test(text);
-      const wordCount = text.split(/\s+/).length;
-
-      if (hasProperCapitalization) score += 2;
-      if (hasPunctuation) score += 3;
-      if (wordCount > 50) score += 5;
-
-      score = Math.min(score, 98);
+    // BEST: Use word-level confidence if available (MOST ACCURATE)
+    if (metadata && metadata.word_confidence_avg && metadata.word_accuracy_distribution) {
+      const wordConfidence = metadata.word_confidence_avg * 100;
+      const distribution = metadata.word_accuracy_distribution;
+      
+      // Calculate weighted score based on distribution
+      const totalWords = distribution.excellent + distribution.good + distribution.fair + distribution.poor;
+      
+      if (totalWords > 0) {
+        const weightedScore = (
+          (distribution.excellent * 100) +
+          (distribution.good * 80) +
+          (distribution.fair * 60) +
+          (distribution.poor * 30)
+        ) / totalWords;
+        
+        // Show detailed breakdown
+        const breakdown = {
+          excellentWords: distribution.excellent,
+          goodWords: distribution.good,
+          fairWords: distribution.fair,
+          poorWords: distribution.poor,
+          uncertainWords: metadata.uncertain_words || [],
+        };
+        
+        return {
+          score: Math.round(weightedScore * 10) / 10,
+          grade: this.getGrade(weightedScore),
+          description: this.getAccuracyDescriptionDetailed(weightedScore, breakdown),
+          source: "word-level",
+          breakdown,
+          avgWordConfidence: Math.round(wordConfidence * 10) / 10,
+          lowConfidenceWords: metadata.low_confidence_words || 0,
+        };
+      }
     }
+
+    // FALLBACK 1: Use overall API confidence
+    if (metadata && metadata.confidence && typeof metadata.confidence === "number") {
+      const apiScore = metadata.confidence * 100;
+      return {
+        score: Math.round(apiScore * 10) / 10,
+        grade: this.getGrade(apiScore),
+        description: this.getAccuracyDescription(apiScore),
+        source: "api",
+      };
+    }
+
+    // FALLBACK 2: Heuristic estimation (LEAST RELIABLE)
+    let score = 30;
+    let penalties = 0;
+
+    const hasProperCapitalization = /[A-Z]/.test(text);
+    const hasPunctuation = /[.,!?;:]/.test(text);
+    const hasMultipleSentences = (text.match(/[.!?]/g) || []).length > 1;
+    const wordCount = text.split(/\s+/).length;
+    const hasConsecutiveCaps = /[A-Z]{3,}/.test(text);
+    const hasProperSentenceStart = /^[A-Z]/.test(text.trim());
+
+    if (hasProperCapitalization && hasProperSentenceStart) score += 8;
+    if (hasPunctuation) score += 7;
+    if (hasMultipleSentences) score += 5;
+    if (wordCount > 30) score += 5;
+    if (wordCount > 80) score += 5;
+
+    if (hasConsecutiveCaps) penalties += 10;
+    if (!hasPunctuation && wordCount > 10) penalties += 15;
+    if (!hasProperCapitalization && wordCount > 5) penalties += 10;
+    if (wordCount < 5) penalties += 20;
+
+    score = Math.max(20, score - penalties);
+    score = Math.min(score, 70);
 
     return {
       score: Math.round(score * 10) / 10,
       grade: this.getGrade(score),
-      description: this.getAccuracyDescription(score),
+      description: this.getAccuracyDescription(score) + " (estimated - limited data)",
+      source: "heuristic",
     };
   }
 
   /**
-   * Calculate speech strength based on vocabulary and assertiveness
+   * NEW: Detailed accuracy description with word-level breakdown
+   */
+  getAccuracyDescriptionDetailed(score, breakdown) {
+    const total = breakdown.excellentWords + breakdown.goodWords + breakdown.fairWords + breakdown.poorWords;
+    const excellentPct = Math.round((breakdown.excellentWords / total) * 100);
+    const poorPct = Math.round((breakdown.poorWords / total) * 100);
+    
+    let description = this.getAccuracyDescription(score);
+    
+    if (excellentPct > 70) {
+      description += ` - ${excellentPct}% of words transcribed with high confidence`;
+    } else if (poorPct > 30) {
+      description += ` - ${poorPct}% of words have low confidence (${breakdown.poorWords}/${total} words uncertain)`;
+    } else {
+      description += ` - Mixed confidence levels across transcription`;
+    }
+    
+    if (breakdown.uncertainWords && breakdown.uncertainWords.length > 0) {
+      const uncertainList = breakdown.uncertainWords.slice(0, 3).map(w => w.text).join(', ');
+      description += `. Uncertain words: "${uncertainList}"`;
+    }
+    
+    return description;
+  }
+
+  /**
+   * Calculate speech strength - FIXED DIVISION
    */
   calculateSpeechStrength(words, sentences) {
     const uniqueWords = new Set(words);
-    const vocabularyRichness = (uniqueWords.size / words.length) * 100;
+    const vocabularyRichness = this.safeDivide(uniqueWords.size, words.length, 0) * 100;
 
-    // Check for strong verbs and assertive language
     const strongVerbs = words.filter((word) =>
       [
         "achieve",
@@ -108,13 +296,18 @@ class SpeechAnalytics {
         "manage",
         "organize",
         "perform",
+        "build",
+        "design",
+        "execute",
+        "deliver",
+        "drive",
+        "transform",
       ].includes(word)
     ).length;
 
-    const assertivenessScore = (strongVerbs / words.length) * 1000;
-
-    const avgWordsPerSentence = words.length / sentences.length;
-    const sentenceComplexity = Math.min((avgWordsPerSentence / 20) * 100, 100);
+    const assertivenessScore = this.safeDivide(strongVerbs, words.length, 0) * 1000;
+    const avgWordsPerSentence = this.safeDivide(words.length, sentences.length, 10);
+    const sentenceComplexity = Math.min(this.safeDivide(avgWordsPerSentence, 20, 0) * 100, 100);
 
     const score =
       vocabularyRichness * 0.4 +
@@ -130,23 +323,21 @@ class SpeechAnalytics {
   }
 
   /**
-   * Calculate clarity based on sentence structure and readability
+   * Calculate clarity - FIXED DIVISION
    */
   calculateClarity(words, sentences, text) {
-    // Flesch Reading Ease Score
     const syllables = this.countSyllables(words);
-    const avgSyllablesPerWord = syllables / words.length;
-    const avgWordsPerSentence = words.length / sentences.length;
+    const avgSyllablesPerWord = this.safeDivide(syllables, words.length, 1.5);
+    const avgWordsPerSentence = this.safeDivide(words.length, sentences.length, 15);
 
     const fleschScore =
       206.835 - 1.015 * avgWordsPerSentence - 84.6 * avgSyllablesPerWord;
     const clarityScore = Math.max(0, Math.min(fleschScore, 100));
 
-    // Check for run-on sentences
     const runOnSentences = sentences.filter(
       (s) => s.split(/\s+/).length > 30
     ).length;
-    const runOnPenalty = (runOnSentences / sentences.length) * 20;
+    const runOnPenalty = this.safeDivide(runOnSentences, sentences.length, 0) * 20;
 
     const finalScore = Math.max(0, clarityScore - runOnPenalty);
 
@@ -160,25 +351,22 @@ class SpeechAnalytics {
   }
 
   /**
-   * Calculate fluency based on filler words and speech patterns
+   * Calculate fluency - FIXED DIVISION
    */
   calculateFluency(words, sentences, text) {
     const fillerCount = this.detectFillerWords(text).totalCount;
-    const fillerRatio = (fillerCount / words.length) * 100;
+    const fillerRatio = this.safeDivide(fillerCount, words.length, 0) * 100;
 
-    // Lower filler ratio = higher fluency
     let fluencyScore = 100 - fillerRatio * 5;
 
-    // Check for repetitive patterns
     const repetitions = this.findRepetitions(words);
-    const repetitionPenalty = (repetitions / words.length) * 100;
+    const repetitionPenalty = this.safeDivide(repetitions, words.length, 0) * 100;
 
     fluencyScore = Math.max(0, fluencyScore - repetitionPenalty);
 
-    // Check for natural flow (varied sentence length)
     const sentenceLengths = sentences.map((s) => s.split(/\s+/).length);
     const lengthVariance = this.calculateVariance(sentenceLengths);
-    const varianceBonus = Math.min(lengthVariance / 2, 10);
+    const varianceBonus = Math.min(this.safeDivide(lengthVariance, 2, 0), 10);
 
     fluencyScore = Math.min(100, fluencyScore + varianceBonus);
 
@@ -191,7 +379,7 @@ class SpeechAnalytics {
   }
 
   /**
-   * Detect and count filler words
+   * Detect filler words - FIXED FOR MULTI-WORD PHRASES
    */
   detectFillerWords(text) {
     const lowerText = text.toLowerCase();
@@ -199,7 +387,16 @@ class SpeechAnalytics {
     let totalCount = 0;
 
     this.fillerWords.forEach((filler) => {
-      const regex = new RegExp(`\\b${filler}\\b`, "gi");
+      let regex;
+
+      // Handle multi-word fillers differently
+      if (filler.includes(" ")) {
+        const escapedFiller = filler.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        regex = new RegExp(escapedFiller, "gi");
+      } else {
+        regex = new RegExp(`\\b${filler}\\b`, "gi");
+      }
+
       const matches = lowerText.match(regex);
       if (matches) {
         detectedFillers[filler] = matches.length;
@@ -208,21 +405,18 @@ class SpeechAnalytics {
     });
 
     const words = this.tokenizeWords(text);
-    const percentage = words.length > 0 ? (totalCount / words.length) * 100 : 0;
+    const percentage = this.safeDivide(totalCount, words.length, 0) * 100;
 
     return {
       totalCount,
       percentage: Math.round(percentage * 10) / 10,
       breakdown: Object.entries(detectedFillers)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 10), // Top 10 filler words
+        .slice(0, 10),
       recommendation: this.getFillerRecommendation(percentage),
     };
   }
 
-  /**
-   * Analyze sentiment using sentiment analysis
-   */
   analyzeSentiment(text) {
     const result = this.sentiment.analyze(text);
 
@@ -242,131 +436,317 @@ class SpeechAnalytics {
     };
   }
 
-  /**
- * Analyze tone of the speech
- */
-analyzeTone(text) {
-  const lowerText = text.toLowerCase();
-  const words = this.tokenizeWords(text);
-  
-  const toneIndicators = {
-    professional: [
-      'furthermore', 'therefore', 'however', 'consequently', 'regarding', 'respective',
-      'accordingly', 'thus', 'hence', 'moreover', 'additionally', 'specifically',
-      'particularly', 'essentially', 'primarily', 'ultimately', 'significantly'
-    ],
-    casual: [
-      'yeah', 'cool', 'awesome', 'stuff', 'things', 'pretty much', 'kind of',
-      'sort of', 'like', 'you know', 'i mean', 'basically', 'actually',
-      'totally', 'really', 'super', 'gonna', 'wanna', 'gotta'
-    ],
-    formal: [
-      'hereby', 'pursuant', 'aforementioned', 'nevertheless', 'notwithstanding',
-      'whereas', 'thereof', 'hereafter', 'heretofore', 'whereby', 'therein',
-      'shall', 'ought', 'must', 'require', 'mandate'
-    ],
-    enthusiastic: [
-      'amazing', 'excellent', 'fantastic', 'wonderful', 'excited', 'love',
-      'great', 'awesome', 'brilliant', 'incredible', 'terrific', 'fabulous',
-      'outstanding', 'superb', 'marvelous', 'thrilled', 'delighted'
-    ],
-    analytical: [
-      'analyze', 'consider', 'evaluate', 'examine', 'investigate', 'determine',
-      'assess', 'measure', 'calculate', 'estimate', 'compare', 'contrast',
-      'conclude', 'infer', 'deduce', 'reason', 'evidence', 'data', 'result'
-    ]
-  };
+  analyzeTone(text) {
+    const lowerText = text.toLowerCase();
+    const words = this.tokenizeWords(text);
 
-  const toneScores = {};
-  let totalMatches = 0;
-  
-  Object.keys(toneIndicators).forEach(tone => {
-    let count = 0;
-    toneIndicators[tone].forEach(indicator => {
-      // Use word boundary matching for better accuracy
-      const regex = new RegExp(`\\b${indicator}\\b`, 'gi');
-      const matches = lowerText.match(regex);
-      if (matches) {
-        count += matches.length;
-      }
+    const toneIndicators = {
+      professional: [
+        "furthermore",
+        "therefore",
+        "however",
+        "consequently",
+        "regarding",
+        "respective",
+        "accordingly",
+        "thus",
+        "hence",
+        "moreover",
+        "additionally",
+        "specifically",
+        "particularly",
+        "essentially",
+        "primarily",
+        "ultimately",
+        "significantly",
+      ],
+      casual: [
+        "yeah",
+        "cool",
+        "awesome",
+        "stuff",
+        "things",
+        "pretty much",
+        "kind of",
+        "sort of",
+        "like",
+        "you know",
+        "i mean",
+        "basically",
+        "actually",
+        "totally",
+        "really",
+        "super",
+        "gonna",
+        "wanna",
+        "gotta",
+      ],
+      formal: [
+        "hereby",
+        "pursuant",
+        "aforementioned",
+        "nevertheless",
+        "notwithstanding",
+        "whereas",
+        "thereof",
+        "hereafter",
+        "heretofore",
+        "whereby",
+        "therein",
+        "shall",
+        "ought",
+        "must",
+        "require",
+        "mandate",
+      ],
+      enthusiastic: [
+        "amazing",
+        "excellent",
+        "fantastic",
+        "wonderful",
+        "excited",
+        "love",
+        "great",
+        "awesome",
+        "brilliant",
+        "incredible",
+        "terrific",
+        "fabulous",
+        "outstanding",
+        "superb",
+        "marvelous",
+        "thrilled",
+        "delighted",
+      ],
+      analytical: [
+        "analyze",
+        "consider",
+        "evaluate",
+        "examine",
+        "investigate",
+        "determine",
+        "assess",
+        "measure",
+        "calculate",
+        "estimate",
+        "compare",
+        "contrast",
+        "conclude",
+        "infer",
+        "deduce",
+        "reason",
+        "evidence",
+        "data",
+        "result",
+      ],
+    };
+
+    const toneScores = {};
+    let totalMatches = 0;
+
+    Object.keys(toneIndicators).forEach((tone) => {
+      let count = 0;
+      toneIndicators[tone].forEach((indicator) => {
+        let regex;
+        if (indicator.includes(" ")) {
+          const escaped = indicator.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          regex = new RegExp(escaped, "gi");
+        } else {
+          regex = new RegExp(`\\b${indicator}\\b`, "gi");
+        }
+        const matches = lowerText.match(regex);
+        if (matches) count += matches.length;
+      });
+      toneScores[tone] = count;
+      totalMatches += count;
     });
-    toneScores[tone] = count;
-    totalMatches += count;
-  });
 
-  // If no matches found, analyze based on other factors
-  if (totalMatches === 0) {
-    // Analyze based on sentence structure and punctuation
-    const hasQuestionMarks = (text.match(/\?/g) || []).length;
-    const hasExclamation = (text.match(/!/g) || []).length;
-    const avgWordLength = words.reduce((sum, w) => sum + w.length, 0) / words.length;
-    const hasContractions = /\b(can't|won't|don't|isn't|aren't|wasn't|weren't|haven't|hasn't|hadn't|couldn't|wouldn't|shouldn't)\b/gi.test(text);
-    
-    // Score based on characteristics
-    if (hasExclamation > words.length * 0.05) {
-      toneScores.enthusiastic = 3;
+    // Fallback analysis
+    if (totalMatches === 0) {
+      const hasQuestionMarks = (text.match(/\?/g) || []).length;
+      const hasExclamation = (text.match(/!/g) || []).length;
+      const avgWordLength = this.safeDivide(
+        words.reduce((sum, w) => sum + w.length, 0),
+        words.length,
+        4
+      );
+      const hasContractions = /\b(can't|won't|don't|isn't|aren't|wasn't|weren't|haven't|hasn't|hadn't|couldn't|wouldn't|shouldn't)\b/gi.test(text);
+
+      if (hasExclamation > words.length * 0.05) toneScores.enthusiastic = 3;
+      if (hasContractions) toneScores.casual = 2;
+      if (avgWordLength > 5.5) toneScores.formal = 2;
+      else if (avgWordLength > 4.5) toneScores.professional = 2;
+      if (hasQuestionMarks > 0) toneScores.analytical = 1;
+
+      if (Object.values(toneScores).every((score) => score === 0)) {
+        toneScores.casual = 1; // Default to casual/neutral
+      }
     }
-    
-    if (hasContractions) {
-      toneScores.casual = 2;
-    }
-    
-    if (avgWordLength > 5.5) {
-      toneScores.formal = 2;
-    } else if (avgWordLength > 4.5) {
-      toneScores.professional = 2;
-    }
-    
-    if (hasQuestionMarks > 0) {
-      toneScores.analytical = 1;
-    }
-    
-    // Default to neutral/professional if still no matches
-    if (Object.values(toneScores).every(score => score === 0)) {
-      toneScores.professional = 1;
-    }
+
+    const maxScore = Math.max(...Object.values(toneScores), 1);
+    const normalizedScores = {};
+    Object.keys(toneScores).forEach((tone) => {
+      normalizedScores[tone] = Math.round(this.safeDivide(toneScores[tone], maxScore, 0) * 10);
+    });
+
+    const dominantTone = Object.entries(normalizedScores)
+      .sort((a, b) => b[1] - a[1])[0];
+
+    return {
+      primary: dominantTone[0],
+      scores: normalizedScores,
+      rawScores: toneScores,
+      description: this.getToneDescription(dominantTone[0]),
+    };
   }
 
-  // Normalize scores to percentage (out of 10 for better visualization)
-  const maxScore = Math.max(...Object.values(toneScores), 1);
-  const normalizedScores = {};
-  Object.keys(toneScores).forEach(tone => {
-    normalizedScores[tone] = Math.round((toneScores[tone] / maxScore) * 10);
-  });
-
-  const dominantTone = Object.entries(normalizedScores)
-    .sort((a, b) => b[1] - a[1])[0];
-
-  return {
-    primary: dominantTone[0],
-    scores: normalizedScores,
-    rawScores: toneScores,
-    description: this.getToneDescription(dominantTone[0])
-  };
-}
-
   /**
-   * Get general statistics
+   * UPDATED: More realistic quality assessment with ADDITIVE penalties
    */
+  assessTranscriptionQuality(text, words, sentences, metadata) {
+    let qualityScore = 100;
+    let penaltyPoints = 0; // Use additive penalties instead of multiplicative
+    const issues = [];
+
+    // 1. Check transcription confidence from API (MOST IMPORTANT)
+    const confidence = (metadata && (metadata.confidence || metadata.original_confidence)) || 0.5; // Default to 50%, not 85%
+
+    if (confidence < 0.5) {
+      penaltyPoints += 50;
+      issues.push("Very low transcription confidence");
+    } else if (confidence < 0.7) {
+      penaltyPoints += 25;
+      issues.push("Low transcription confidence");
+    } else if (confidence < 0.85) {
+      penaltyPoints += 10;
+      issues.push("Moderate transcription confidence");
+    }
+
+    // 2. Check for gibberish/nonsense patterns
+    const gibberishPatterns = [
+      /^[^a-zA-Z0-9\s]{5,}$/,
+      /(.)\1{5,}/,
+      /^[aeiou]{10,}$/i,
+      /\b\w{20,}\b/,
+    ];
+
+    if (gibberishPatterns.some((pattern) => pattern.test(text))) {
+      penaltyPoints += 60;
+      issues.push("Detected garbled or nonsense text");
+    }
+
+    // 3. Word length ratio
+    const avgWordLength = this.safeDivide(text.length, words.length, 5);
+    if (avgWordLength > 15) {
+      penaltyPoints += 40;
+      issues.push("Unusually long words detected (possible errors)");
+    } else if (avgWordLength < 2) {
+      penaltyPoints += 30;
+      issues.push("Unusually short words (possible fragmentation)");
+    }
+
+    // 4. Minimum content check
+    if (words.length < 5) {
+      penaltyPoints += 50;
+      issues.push("Very short transcription (insufficient data)");
+    } else if (words.length < 15) {
+      penaltyPoints += 20;
+      issues.push("Short transcription (limited analysis)");
+    }
+
+    // 5. Sentence structure
+    if (sentences.length === 0) {
+      penaltyPoints += 40;
+      issues.push("No sentence structure detected");
+    } else if (this.safeDivide(words.length, sentences.length, 0) > 50) {
+      penaltyPoints += 20;
+      issues.push("Extremely long sentences (possible run-on errors)");
+    }
+
+    // 6. Repetitive text
+    const uniqueWords = new Set(words);
+    const repetitionRatio = this.safeDivide(uniqueWords.size, words.length, 1);
+    if (repetitionRatio < 0.3) {
+      penaltyPoints += 40;
+      issues.push("High word repetition (possible transcription error)");
+    } else if (repetitionRatio < 0.5) {
+      penaltyPoints += 15;
+      issues.push("Moderate word repetition");
+    }
+
+    // 7. Filler word dominance
+    const fillerCount = this.detectFillerWords(text).totalCount;
+    const fillerRatio = this.safeDivide(fillerCount, words.length, 0);
+    if (fillerRatio > 0.5) {
+      penaltyPoints += 50;
+      issues.push("Predominantly filler words (poor audio quality)");
+    } else if (fillerRatio > 0.3) {
+      penaltyPoints += 25;
+      issues.push("High filler word ratio");
+    }
+
+    // 8. Capitalization check
+    const capitalizedWords = text.match(/\b[A-Z][a-z]+/g) || [];
+    if (capitalizedWords.length === 0 && words.length > 10) {
+      penaltyPoints += 15;
+      issues.push("No capitalization (possible quality issue)");
+    }
+
+    // 9. Punctuation check
+    const punctuationCount = (text.match(/[.,!?;:]/g) || []).length;
+    if (punctuationCount === 0 && sentences.length > 2) {
+      penaltyPoints += 10;
+      issues.push("No punctuation detected");
+    }
+
+    // 10. Language confidence
+    if (metadata && metadata.language_confidence && metadata.language_confidence < 0.5) {
+      penaltyPoints += 30;
+      issues.push("Uncertain language detection");
+    }
+
+    // Apply additive penalty
+    qualityScore = Math.max(0, qualityScore - penaltyPoints);
+    const qualityFactor = Math.max(0.1, Math.min(1.0, qualityScore / 100));
+
+    // Determine quality level
+    let qualityLevel = "excellent";
+    if (qualityFactor < 0.4) qualityLevel = "poor";
+    else if (qualityFactor < 0.6) qualityLevel = "fair";
+    else if (qualityFactor < 0.8) qualityLevel = "good";
+
+    return {
+      overallQualityFactor: qualityFactor,
+      qualityLevel,
+      qualityScore: Math.round(qualityFactor * 100),
+      confidence: confidence,
+      issues: issues,
+      adjustmentReason:
+        issues.length > 0 ? `Scores adjusted due to: ${issues.join(", ")}` : "High quality transcription, no adjustments needed",
+      metricsReliability: qualityLevel,
+    };
+  }
+
   getStatistics(words, sentences, text) {
+    const avgWordLength = this.safeDivide(
+      words.reduce((sum, w) => sum + w.length, 0),
+      words.length,
+      0
+    );
+    const avgSentenceLength = this.safeDivide(words.length, sentences.length, 0);
+
     return {
       totalWords: words.length,
       totalSentences: sentences.length,
       totalCharacters: text.length,
       uniqueWords: new Set(words).size,
-      avgWordLength:
-        Math.round(
-          (words.reduce((sum, w) => sum + w.length, 0) / words.length) * 10
-        ) / 10,
-      avgSentenceLength:
-        Math.round((words.length / sentences.length) * 10) / 10,
+      avgWordLength: Math.round(avgWordLength * 10) / 10,
+      avgSentenceLength: Math.round(avgSentenceLength * 10) / 10,
     };
   }
 
-  // Helper methods
   countSyllables(words) {
     return words.reduce((count, word) => {
-      // Simple syllable counting algorithm
       word = word.toLowerCase();
       if (word.length <= 3) return count + 1;
 
@@ -388,9 +768,13 @@ analyzeTone(text) {
   }
 
   calculateVariance(numbers) {
+    if (numbers.length === 0) return 0;
+    if (numbers.length === 1) return 0;
+
     const avg = numbers.reduce((a, b) => a + b, 0) / numbers.length;
     const squareDiffs = numbers.map((value) => Math.pow(value - avg, 2));
-    return Math.sqrt(squareDiffs.reduce((a, b) => a + b, 0) / numbers.length);
+    const variance = squareDiffs.reduce((a, b) => a + b, 0) / numbers.length;
+    return Math.sqrt(variance);
   }
 
   getGrade(score) {
@@ -402,11 +786,12 @@ analyzeTone(text) {
   }
 
   getAccuracyDescription(score) {
-    if (score >= 95) return "Excellent transcription quality";
-    if (score >= 85) return "Very good transcription quality";
-    if (score >= 75) return "Good transcription quality";
-    if (score >= 65) return "Fair transcription quality";
-    return "Poor transcription quality - consider better audio quality";
+    if (score >= 90) return "Excellent transcription quality";
+    if (score >= 70) return "Very good transcription quality";
+    if (score >= 50) return "Good transcription quality";
+    if (score >= 30) return "Fair transcription quality";
+    if (score >= 10) return "Poor transcription quality";
+    return "Very poor transcription quality - consider better audio";
   }
 
   getStrengthDescription(score) {
@@ -424,9 +809,9 @@ analyzeTone(text) {
   }
 
   getFluencyDescription(score) {
-    if (score >= 90) return "Highly fluent speech";
-    if (score >= 75) return "Good fluency with minor hesitations";
-    if (score >= 60) return "Moderate fluency";
+    if (score >= 80) return "Highly fluent speech";
+    if (score >= 60) return "Good fluency with minor hesitations";
+    if (score >= 40) return "Moderate fluency";
     return "Needs improvement - reduce filler words";
   }
 

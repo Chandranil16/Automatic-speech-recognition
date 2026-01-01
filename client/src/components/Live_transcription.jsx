@@ -37,73 +37,128 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
   }, []);
 
   const cleanup = () => {
+    console.log("🧹 Cleaning up audio resources...");
+
     if (
       mediaRecorderRef.current &&
       mediaRecorderRef.current.state === "recording"
     ) {
       mediaRecorderRef.current.stop();
     }
+
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((track) => {
+        track.stop();
+        console.log("Stopped track:", track.kind);
+      });
+      streamRef.current = null;
     }
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close();
-    }
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
+
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close();
+      console.log("Closed audio context");
+      audioContextRef.current = null;
+    }
+
     clearInterval(timerRef.current);
+    timerRef.current = null;
+
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+
+    if (gainNodeRef.current) {
+      gainNodeRef.current.disconnect();
+      gainNodeRef.current = null;
+    }
+
     setAudioQuality("checking");
     setAudioLevel(0);
+    setIsRecording(false);
+
+    console.log("✅ Cleanup complete");
   };
 
-  // Advanced audio processing and noise suppression
+  // Phone-optimized audio processing (less aggressive)
   const setupAdvancedAudioProcessing = (stream) => {
     try {
       audioContextRef.current = new (window.AudioContext ||
         window.webkitAudioContext)();
 
-      // Create audio processing chain
       const source = audioContextRef.current.createMediaStreamSource(stream);
 
-      // Gain control for volume normalization
+      // REDUCED PROCESSING for phone audio
+
+      // 1. MODERATE HIGH-PASS FILTER (allow more low frequencies)
+      const highPassFilter = audioContextRef.current.createBiquadFilter();
+      highPassFilter.type = "highpass";
+      highPassFilter.frequency.value = 80; // LOWERED from 200Hz
+      highPassFilter.Q.value = 0.5; // Gentler filtering
+
+      // 2. MODERATE LOW-PASS FILTER (keep more range)
+      const lowPassFilter = audioContextRef.current.createBiquadFilter();
+      lowPassFilter.type = "lowpass";
+      lowPassFilter.frequency.value = 8000; // RAISED from 3400Hz
+      lowPassFilter.Q.value = 0.5;
+
+      // 3. LIGHTER COMPRESSION (preserve dynamics)
+      const compressor = audioContextRef.current.createDynamicsCompressor();
+      compressor.threshold.value = -40; // HIGHER threshold
+      compressor.knee.value = 20; // Softer knee
+      compressor.ratio.value = 4; // LOWER ratio
+      compressor.attack.value = 0.01; // Slower attack
+      compressor.release.value = 0.25; // Longer release
+
+      // 4. MODERATE GAIN (don't over-amplify noise)
       gainNodeRef.current = audioContextRef.current.createGain();
-      gainNodeRef.current.gain.value = 2.0; // Boost quiet audio
+      gainNodeRef.current.gain.value = 2.0; // REDUCED from 3.0
 
-      // Advanced analyzer for real-time monitoring
+      // 5. ANALYZER
       analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 4096; // Higher resolution
-      analyserRef.current.smoothingTimeConstant = 0.2; // Responsive
-      analyserRef.current.minDecibels = -90;
-      analyserRef.current.maxDecibels = -10;
+      analyserRef.current.fftSize = 2048; // REDUCED for less CPU
+      analyserRef.current.smoothingTimeConstant = 0.5; // More smoothing
+      analyserRef.current.minDecibels = -80;
+      analyserRef.current.maxDecibels = -20;
 
-      // Connect processing chain
-      source.connect(gainNodeRef.current);
+      // Connect chain
+      source.connect(highPassFilter);
+      highPassFilter.connect(lowPassFilter);
+      lowPassFilter.connect(compressor);
+      compressor.connect(gainNodeRef.current);
       gainNodeRef.current.connect(analyserRef.current);
+
+      console.log("✅ Phone-optimized audio processing initialized:", {
+        highPass: "80Hz",
+        lowPass: "8000Hz",
+        compression: "4:1 ratio",
+        gain: "2.0x initial",
+      });
 
       const frequencyData = new Uint8Array(
         analyserRef.current.frequencyBinCount
       );
-      const timeData = new Uint8Array(analyserRef.current.fftSize);
 
       const processAudio = () => {
         if (!isRecording) return;
 
         analyserRef.current.getByteFrequencyData(frequencyData);
-        analyserRef.current.getByteTimeDomainData(timeData);
 
-        // Calculate speech frequency range (300Hz - 3400Hz - human voice)
+        // RELAXED quality assessment for phone audio
         const sampleRate = audioContextRef.current.sampleRate;
         const nyquist = sampleRate / 2;
         const binSize = nyquist / frequencyData.length;
 
-        const speechStart = Math.floor(300 / binSize); // 300Hz
-        const speechEnd = Math.floor(3400 / binSize); // 3400Hz
+        const speechStart = Math.floor(150 / binSize); // Wider range
+        const speechEnd = Math.floor(4000 / binSize);
 
-        // Calculate speech energy vs noise
         let speechEnergy = 0;
         let totalEnergy = 0;
-        let noiseEnergy = 0;
 
         for (let i = 0; i < frequencyData.length; i++) {
           const energy = frequencyData[i];
@@ -111,36 +166,41 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
           if (i >= speechStart && i <= speechEnd) {
             speechEnergy += energy;
-          } else if (i < speechStart || i > speechEnd) {
-            noiseEnergy += energy / 2; // Weight noise less
           }
         }
 
-        // Calculate signal-to-noise ratio
         const speechRatio = speechEnergy / (totalEnergy || 1);
-        const snr = speechEnergy / (noiseEnergy || 1);
 
-        // Dynamic gain adjustment based on signal strength
-        if (speechEnergy > 0) {
-          const targetGain = Math.max(1.0, Math.min(3.0, 100 / speechEnergy));
+        // ADAPTIVE GAIN (more moderate for phone)
+        if (speechEnergy > 0 && speechEnergy < 80) {
+          const targetGain = 2.5;
           gainNodeRef.current.gain.value =
-            gainNodeRef.current.gain.value * 0.9 + targetGain * 0.1;
+            gainNodeRef.current.gain.value * 0.95 + targetGain * 0.05;
+        } else if (speechEnergy < 150) {
+          const targetGain = 2.0;
+          gainNodeRef.current.gain.value =
+            gainNodeRef.current.gain.value * 0.95 + targetGain * 0.05;
+        } else {
+          const targetGain = 1.5;
+          gainNodeRef.current.gain.value =
+            gainNodeRef.current.gain.value * 0.95 + targetGain * 0.05;
         }
 
-        // Audio quality assessment
-        let quality = "poor";
-        if (snr > 3 && speechRatio > 0.3) {
+        // RELAXED quality assessment
+        let quality = "fair";
+        if (speechRatio > 0.25 && speechEnergy > 60) {
           quality = "excellent";
-        } else if (snr > 2 && speechRatio > 0.2) {
+        } else if (speechRatio > 0.15 && speechEnergy > 40) {
           quality = "good";
-        } else if (snr > 1.5 && speechRatio > 0.1) {
+        } else if (speechEnergy > 20) {
           quality = "fair";
+        } else {
+          quality = "poor";
         }
 
         setAudioQuality(quality);
 
-        // Audio level visualization (focus on speech frequencies)
-        const speechLevel = Math.min(100, (speechEnergy / 50) * 100);
+        const speechLevel = Math.min(100, (speechEnergy / 80) * 100);
         setAudioLevel(speechLevel);
 
         animationFrameRef.current = requestAnimationFrame(processAudio);
@@ -148,67 +208,55 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
       processAudio();
     } catch (err) {
-      console.warn("Advanced audio processing not available:", err);
+      console.error("❌ Audio processing failed:", err);
       setAudioQuality("basic");
     }
   };
 
-  // Optimized audio constraints for clear speech capture
+  // Optimized audio constraints for phone compatibility
   const getOptimalAudioConstraints = async () => {
     const constraintSets = [
-      // Highest quality for speech recognition
+      // OPTIMIZED FOR PHONE AUDIO
       {
         audio: {
           sampleRate: { ideal: 48000, min: 16000 },
-          sampleSize: { ideal: 16 },
-          channelCount: { exact: 1 }, // Mono for speech
+          channelCount: { ideal: 1 },
+
+          // CRITICAL: Less aggressive processing for phone
           echoCancellation: { ideal: true },
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true },
-          // Advanced Chrome constraints
+
+          // Chrome-specific (gentler)
           googEchoCancellation: { ideal: true },
           googAutoGainControl: { ideal: true },
           googNoiseSuppression: { ideal: true },
-          googHighpassFilter: { ideal: true },
-          googTypingNoiseDetection: { ideal: true },
-          googAudioMirroring: { ideal: false },
-          // Speech-specific constraints
-          googAGC: { ideal: true },
-          googNS: { ideal: true },
-          googEchoCancellation2: { ideal: true },
-          googDAEchoCancellation: { ideal: true },
+          googHighpassFilter: { ideal: false }, // DISABLE hardware HPF
+
+          latency: { ideal: 0.02 },
         },
       },
-      // High quality fallback
+
+      // SIMPLE FALLBACK (most compatible)
       {
         audio: {
-          sampleRate: { ideal: 44100, min: 16000 },
-          channelCount: { ideal: 1 },
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          googNoiseSuppression: true,
-          googEchoCancellation: true,
-        },
-      },
-      // Standard quality
-      {
-        audio: {
-          sampleRate: 16000, // Standard for speech
+          sampleRate: 44100,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
         },
       },
-      // Basic fallback
+
+      // BASIC
       {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
         },
       },
-      // Last resort
+
+      // LAST RESORT
       { audio: true },
     ];
 
@@ -221,12 +269,13 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
         if (track) {
           const settings = track.getSettings();
-          console.log(`Audio setup successful (attempt ${i + 1}):`, {
+          console.log(`✅ Audio setup (attempt ${i + 1}):`, {
             sampleRate: settings.sampleRate,
             channelCount: settings.channelCount,
             echoCancellation: settings.echoCancellation,
             noiseSuppression: settings.noiseSuppression,
             autoGainControl: settings.autoGainControl,
+            latency: settings.latency,
           });
 
           testStream.getTracks().forEach((track) => track.stop());
@@ -235,33 +284,12 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
         testStream.getTracks().forEach((track) => track.stop());
       } catch (err) {
-        console.warn(`Audio constraint attempt ${i + 1} failed:`, err.message);
+        console.warn(`⚠️ Attempt ${i + 1} failed:`, err.message);
         continue;
       }
     }
 
-    throw new Error("Unable to access microphone with any configuration");
-  };
-
-  // Best MIME type for speech clarity
-  const getBestMimeType = () => {
-    const speechTypes = [
-      "audio/wav", // Best for speech recognition
-      "audio/webm;codecs=opus", // Good compression, good quality
-      "audio/webm;codecs=pcm", // Uncompressed
-      "audio/webm",
-      "audio/mp4;codecs=mp4a.40.2", // AAC
-      "audio/ogg;codecs=opus",
-    ];
-
-    for (const type of speechTypes) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        console.log("Using MIME type for speech:", type);
-        return type;
-      }
-    }
-
-    return "audio/webm"; // Fallback
+    throw new Error("Unable to access microphone");
   };
 
   const formatTime = (seconds) => {
@@ -282,17 +310,33 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
       streamRef.current = stream;
-
-      // Setup advanced audio processing
       setupAdvancedAudioProcessing(stream);
 
-      const mimeType = getBestMimeType();
+      // IMPORTANT: Use compatible MIME type for phone recordings
+      const mimeTypes = [
+        "audio/webm;codecs=opus", // Best for phone
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        "audio/wav",
+      ];
 
-      // Optimized MediaRecorder settings for speech
+      let selectedMimeType = "";
+      for (const type of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          selectedMimeType = type;
+          console.log("📱 Using MIME type:", type);
+          break;
+        }
+      }
+
+      if (!selectedMimeType) {
+        selectedMimeType = "audio/webm";
+      }
+
       const options = {
-        mimeType,
-        audioBitsPerSecond: 128000, // High quality for clarity
-        bitsPerSecond: 128000,
+        mimeType: selectedMimeType,
+        audioBitsPerSecond: 64000, // REDUCED for phone (was 128000)
       };
 
       mediaRecorderRef.current = new MediaRecorder(stream, options);
@@ -303,14 +347,16 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
         if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
           totalChunks++;
-          console.log(
-            `Clear audio chunk ${totalChunks}: ${event.data.size} bytes`
-          );
+          if (totalChunks % 5 === 0) {
+            console.log(`📦 Recorded ${totalChunks} chunks, total size: ${
+              audioChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0)
+            } bytes`);
+          }
         }
       };
 
       mediaRecorderRef.current.onstop = async () => {
-        console.log("Processing clear audio recording...");
+        console.log("🎬 Processing recording...");
 
         if (audioChunksRef.current.length === 0) {
           setError(
@@ -320,10 +366,13 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
           return;
         }
 
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: selectedMimeType,
+        });
 
-        console.log("Clear audio blob created:", {
+        console.log("📦 Audio blob created:", {
           size: audioBlob.size,
+          sizeKB: Math.round(audioBlob.size / 1024),
           type: audioBlob.type,
           chunks: audioChunksRef.current.length,
           quality: audioQuality,
@@ -332,19 +381,20 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
         cleanup();
         setIsRecording(false);
 
-        if (audioBlob.size > 3000) {
-          // Minimum 3KB for clear audio
+        // LOWERED minimum size for phone recordings
+        if (audioBlob.size > 2000) {
+          // 2KB minimum
           await sendAudioToServer(audioBlob);
         } else {
           setError(
-            "Recording too short. Please record at least 2-3 seconds of clear speech."
+            "Recording too short or silent. Please speak clearly and try again."
           );
           setLoading(false);
         }
       };
 
       mediaRecorderRef.current.onerror = (event) => {
-        console.error("Recording error:", event.error);
+        console.error("❌ Recording error:", event.error);
         setError("Recording failed. Please try again.");
         setIsRecording(false);
         setLoading(false);
@@ -352,25 +402,27 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
       };
 
       mediaRecorderRef.current.onstart = () => {
-        console.log("Clear audio recording started");
+        console.log("🎙️ Recording started");
         setIsRecording(true);
         setLoading(false);
       };
 
-      // Start with frequent chunks for better quality monitoring
-      mediaRecorderRef.current.start(200); // 200ms chunks
+      // IMPORTANT: Larger chunks for phone (more reliable)
+      mediaRecorderRef.current.start(500); // 500ms chunks
     } catch (err) {
-      console.error("Error starting recording:", err);
+      console.error("❌ Error starting recording:", err);
       let errorMessage = "Failed to start recording. ";
 
       if (err.name === "NotAllowedError") {
-        errorMessage += "Please allow microphone access.";
+        errorMessage +=
+          "Please allow microphone access in your browser settings.";
       } else if (err.name === "NotFoundError") {
-        errorMessage += "No microphone detected.";
+        errorMessage += "No microphone detected. Please check your device.";
       } else if (err.name === "NotReadableError") {
-        errorMessage += "Microphone is busy or unavailable.";
+        errorMessage +=
+          "Microphone is busy. Close other apps using the microphone.";
       } else {
-        errorMessage += "Please check your microphone and try again.";
+        errorMessage += err.message || "Please check your microphone and try again.";
       }
 
       setError(errorMessage);
@@ -388,6 +440,7 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
       mediaRecorderRef.current &&
       mediaRecorderRef.current.state === "recording"
     ) {
+      console.log("⏹️ Stopping recording...");
       mediaRecorderRef.current.stop();
     } else {
       cleanup();
@@ -399,7 +452,7 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
     const formData = new FormData();
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `clear-audio-${timestamp}.wav`;
+    const filename = `recording-${timestamp}.webm`;
 
     formData.append("audio", audioBlob, filename);
     formData.append("mimeType", audioBlob.type);
@@ -407,9 +460,10 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
     formData.append("quality", audioQuality);
 
     try {
-      console.log("Sending clear audio for transcription:", {
+      console.log("📤 Sending audio for transcription:", {
         filename,
         size: audioBlob.size,
+        sizeKB: Math.round(audioBlob.size / 1024),
         type: audioBlob.type,
         quality: audioQuality,
       });
@@ -421,37 +475,52 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
           headers: {
             "Content-Type": "multipart/form-data",
           },
-          timeout: 120000,
+          timeout: 120000, // 2 minutes
           onUploadProgress: (progressEvent) => {
             const percentCompleted = Math.round(
               (progressEvent.loaded * 100) / progressEvent.total
             );
             if (percentCompleted % 20 === 0) {
-              console.log(`Upload progress: ${percentCompleted}%`);
+              console.log(`📊 Upload progress: ${percentCompleted}%`);
             }
           },
         }
       );
 
+      console.log("✅ Transcription response received:", {
+        textLength: response.data.text?.length,
+        hasAnalytics: !!response.data.analytics,
+      });
+
       if (response.data && response.data.text) {
         setTranscription(response.data.text);
-        // ADD: Handle analytics from response
+
+        // Handle analytics from response
         if (setAnalytics && response.data.analytics) {
           setAnalytics(response.data.analytics);
         }
       } else {
-        setError("No text detected in audio. Please speak more clearly.");
+        setError(
+          "No speech detected in audio. Please speak more clearly or check background noise."
+        );
       }
     } catch (err) {
-      console.error("Transcription error:", err);
+      console.error("❌ Transcription error:", err);
       let errorMessage = "Transcription failed. ";
 
       if (err.code === "ECONNABORTED") {
-        errorMessage += "Request timed out - please try shorter recordings.";
+        errorMessage +=
+          "Request timed out - audio may be too long. Try shorter recordings.";
       } else if (err.response?.status >= 500) {
-        errorMessage += "Server error - please try again.";
+        errorMessage += "Server error - please try again in a moment.";
+      } else if (err.response?.status === 400) {
+        errorMessage +=
+          "Audio format not supported. Try using a different device or browser.";
+      } else if (err.response?.data?.error) {
+        errorMessage = err.response.data.error;
       } else {
-        errorMessage += "Please try recording again with clearer audio.";
+        errorMessage +=
+          "Please try recording again with less background noise.";
       }
 
       setError(errorMessage);
@@ -517,7 +586,7 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
         {/* Status Display */}
         <div className="space-y-4">
           <h3 className="text-2xl font-semibold text-gray-800">
-            {isRecording ? "Recording Clear Audio" : "Ready to Record"}
+            {isRecording ? "Recording..." : "Ready to Record"}
           </h3>
 
           {isRecording && (
@@ -572,8 +641,8 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
           <p className="text-gray-600 max-w-md mx-auto">
             {isRecording
-              ? "Speak clearly and naturally. Advanced noise suppression is active."
-              : "Click to start recording with advanced noise suppression"}
+              ? "Speak clearly. Optimized for phone and noisy environments."
+              : "Click to start recording with phone-optimized processing"}
           </p>
         </div>
 
@@ -622,14 +691,12 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
             {/* Real-time feedback */}
             <div className="text-sm text-gray-600">
-              {audioQuality === "excellent" &&
-                "🎯 Crystal clear audio detected"}
+              {audioQuality === "excellent" && "🎯 Crystal clear audio detected"}
               {audioQuality === "good" && "✅ Good audio quality"}
               {audioQuality === "fair" && "⚠️ Speak a bit louder or closer"}
               {audioQuality === "poor" && "📢 Please speak louder and clearer"}
               {audioQuality === "checking" && "🔍 Analyzing audio quality..."}
-              {audioQuality === "initializing" &&
-                "⚡ Starting advanced processing..."}
+              {audioQuality === "initializing" && "⚡ Starting phone-optimized recording..."}
             </div>
           </div>
         )}
@@ -638,12 +705,10 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
       {/* Audio Tips */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
         {[
-          { icon: "🎤", text: "Speak directly into your microphone" },
-          { icon: "🔇", text: "Minimize background noise for best results" },
-          { icon: "📏", text: "Keep 6-8 inches from microphone" },
-          { icon: "🗣️", text: "Speak at normal conversational volume" },
-          { icon: "⚡", text: "Advanced noise suppression is active" },
-          { icon: "🎯", text: "Watch the quality indicator for feedback" },
+          { icon: "🔇", text: "Optimized for background noise" },
+          { icon: "🗣️", text: "Speak naturally and clearly" },
+          { icon: "⚡", text: "Fast processing with nano model" },
+          { icon: "🌍", text: "Automatic language detection" },
         ].map((tip, index) => (
           <div
             key={index}
