@@ -23,17 +23,11 @@ The system supports audio file transcription (WAV only) and live speech recordin
 
 - Speech Analytics Dashboard
     - After transcription, the system generates a dashboard containing performance insights such as:
-    - 🎯 Speech Performance Metrics
-      - Accuracy, Speech Strength, Clarity, Fluency
-    - 🧾 Filler Word Detection
-      - Total filler words detected
-      - Helps evaluate hesitation patterns and confidence level
-    -  😊 Sentiment Analysis
-      - Number of positive words, Number of negative words
-    -  🎭 Tone Analysis
-      - Identifies tone style from the transcription content
-    - 📌 Transcript Statistics
-      - Total words, Total sentences, Average word length
+    - 🎯 Speech Performance Metrics - Accuracy, Speech Strength, Clarity, Fluency
+    - 🧾 Filler Word Detection - Total filler words detected; Helps evaluate hesitation patterns and confidence level
+    -  😊 Sentiment Analysis - Number of positive words, Number of negative words
+    -  🎭 Tone Analysis - Identifies tone style from the transcription content
+    - 📌 Transcript Statistics - Total words, Total sentences, Average word length
 ---
 
 ## 🛠️ Tech Stack
