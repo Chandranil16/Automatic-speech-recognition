@@ -4,6 +4,7 @@ A Automatic Speech Recognition (ASR) web application built using React, Tailwind
 The system supports audio file transcription (WAV only) and live speech recording transcription, and generates a detailed Speech Analytics Dashboard based on the transcription results.
 
 ⚠️**This project is currently under development and will continue to receive improvements for fine-tuning, noise suppresion, speed, accuracy, UI/UX, and overall performance.**
+
 ---
 ## 🚀 Features
 
@@ -22,21 +23,17 @@ The system supports audio file transcription (WAV only) and live speech recordin
 
 - Speech Analytics Dashboard
     - After transcription, the system generates a dashboard containing performance insights such as:
-     
-       - 🎯 Speech Performance Metrics
-           - Accuracy, Speech Strength, Clarity, Fluency
-       - 🧾 Filler Word Detection
-           - Total filler words detected
-           - Helps evaluate hesitation patterns and confidence level
-
-       -  😊 Sentiment Analysis
-           - Number of positive words, Number of negative words
-
-       - 🎭 Tone Analysis
-           - Identifies tone style from the transcription content
-   
-       - 📌 Transcript Statistics
-           - Total words, Total sentences, Average word length
+    - 🎯 Speech Performance Metrics
+      - Accuracy, Speech Strength, Clarity, Fluency
+    - 🧾 Filler Word Detection
+      - Total filler words detected
+      - Helps evaluate hesitation patterns and confidence level
+    -  😊 Sentiment Analysis
+      - Number of positive words, Number of negative words
+    -  🎭 Tone Analysis
+      - Identifies tone style from the transcription content
+    - 📌 Transcript Statistics
+      - Total words, Total sentences, Average word length
 ---
 
 ## 🛠️ Tech Stack
