@@ -5,7 +5,7 @@ The system supports audio file transcription (WAV only) and live speech recordin
 ---
 ⚠️**This project is currently under development and will continue to receive improvements for fine-tuning, noise suppresion, speed, accuracy, UI/UX, and overall performance.**
 
-## 🚀 **Features**
+## 🚀 Features
 1. Transcription Modes
 i) Upload & Transcribe (WAV only)
     - Upload .wav audio files
@@ -38,17 +38,17 @@ ii) Live Recording & Transcribe
    e) 📌 Transcript Statistics
        - Total words, Total sentences, Average word length
 ---
-##🛠️ **Tech Stack**
-      - Frontend: React.js, Tailwind CSS, Browser-based audio recording support, Responsive UI components for transcript and dashboard
-      - Backend: Node.js, Express.js, REST APIs, Multer for file upload
-      - AI / Speech-to-Text: AssemblyAI LLM (AI- powered, real-time, secure)
+##🛠️ Tech Stack
+    **Frontend** : React.js, Tailwind CSS, Browser-based audio recording support, Responsive UI components for transcript and dashboard
+    **Backend** : Node.js, Express.js, REST APIs, Multer for file upload
+    **AI / Speech-to-Text** : AssemblyAI LLM (AI- powered, real-time, secure)
 ---
-##📌 **Current Limitations**
+##📌 Current Limitations
       - Only WAV file upload supported
       - Dashboard accuracy depends on current analytics logic (still improving)
       - Response time depends on: audio length, API latency, server processing speed
 ---
-##🔃 **Future Improvements**
+##🔃 Future Improvements
     - Support for more audio formats (MP3, M4A, etc.)
     - Multi-lingual support for all languages
     - Better real-time transcription handling & faster response time
