@@ -1,5 +1,5 @@
 # 🎙️ **Automatic Speech Recognition (ASR) with Speech Analytics Dashboard**
----
+
 A Automatic Speech Recognition (ASR) web application built using React, Tailwind CSS Node.js, Express js, powered by AssemblyAI API for transcription.
 The system supports audio file transcription (WAV only) and live speech recording transcription, and generates a detailed Speech Analytics Dashboard based on the transcription results.
 ---
@@ -7,11 +7,11 @@ The system supports audio file transcription (WAV only) and live speech recordin
 
 ## 🚀 **Features**
 1. Transcription Modes
-   i) Upload & Transcribe (WAV only)
+i) Upload & Transcribe (WAV only)
     - Upload .wav audio files
     - Get transcription output instantly on the UI
       
-   ii) Live Recording & Transcribe
+ii) Live Recording & Transcribe
     - Record live voice from the browser
     - Convert speech to text in real-time / near real-time
 
@@ -24,33 +24,29 @@ The system supports audio file transcription (WAV only) and live speech recordin
     - After transcription, the system generates a dashboard containing performance insights such as:
      
    a) 🎯 Speech Performance Metrics
-       - Accuracy (%)
-       - Speech Strength (%)
-       - Clarity (%)
-       - Fluency (%)
-    b) 🧾 Filler Word Detection
+       - Accuracy, Speech Strength, Clarity, Fluency
+   b) 🧾 Filler Word Detection
        - Total filler words detected
        - Helps evaluate hesitation patterns and confidence level
 
-    c) 😊 Sentiment Analysis
-       - Number of positive words
-       - Number of negative words
+   c) 😊 Sentiment Analysis
+       - Number of positive words, Number of negative words
 
-    d) 🎭 Tone Analysis
+   d) 🎭 Tone Analysis
        - Identifies tone style from the transcription content
    
-    e) 📌 Transcript Statistics
+   e) 📌 Transcript Statistics
        - Total words, Total sentences, Average word length
 ---
 ##🛠️ **Tech Stack**
-       - Frontend: React.js, Tailwind CSS, Browser-based audio recording support, Responsive UI components for transcript + dashboard
-       - Backend:  Node.js, Express.js, REST APIs for transcription and analytics generation, Multer for file upload
-       - AI / Speech-to-Text: AssemblyAI LLM (AI- powered, real-time, secure)
+      - Frontend: React.js, Tailwind CSS, Browser-based audio recording support, Responsive UI components for transcript and dashboard
+      - Backend: Node.js, Express.js, REST APIs, Multer for file upload
+      - AI / Speech-to-Text: AssemblyAI LLM (AI- powered, real-time, secure)
 ---
 ##📌 **Current Limitations**
-   - Only WAV file upload supported
-   - Dashboard accuracy depends on current analytics logic (still improving)
-   - Response time depends on: audio length, API latency, server processing speed
+      - Only WAV file upload supported
+      - Dashboard accuracy depends on current analytics logic (still improving)
+      - Response time depends on: audio length, API latency, server processing speed
 ---
 ##🔃 **Future Improvements**
     - Support for more audio formats (MP3, M4A, etc.)
@@ -63,4 +59,4 @@ The system supports audio file transcription (WAV only) and live speech recordin
     - Authentication + user transcription history
 ---    
 ##👤 Author
-  - Developed with 💖 by myself (Chandranil Adhikary)
+    - Developed with 💖 by myself (Chandranil Adhikary)
