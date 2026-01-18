@@ -17,7 +17,7 @@ const validateFile = (file) => {
     throw new Error('Audio file is empty');
   }
 
-  if (stats.size < 100) { // Less than 100 bytes is probably not valid audio
+  if (stats.size < 100) { 
     throw new Error('Audio file too small - may be corrupted');
   }
 
@@ -86,7 +86,6 @@ const transcribe_upload_file = async (req, res, next) => {
     console.error('Error during transcription:', error);
     cleanupFile(filePath);
     
-    // Send more specific error messages
     const errorMessage = error.message.includes('AssemblyAI') 
       ? 'Transcription service error - please try again'
       : error.message.includes('file') 
@@ -141,7 +140,6 @@ const transcribe_stream = async (req, res, next) => {
     console.error('❌ Stream transcription error:', error);
     cleanupFile(filePath);
     
-    // More specific error messages for phone audio
     let errorMessage = 'Transcription failed';
     
     if (error.message.includes('music') || error.message.includes('noise')) {

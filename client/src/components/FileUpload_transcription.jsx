@@ -54,7 +54,6 @@ const FileUpload = ({ setTranscription, setAnalytics, loading, setLoading }) => 
     setTranscription('')
 
     try {
-      // Using full backend URL directly
       const response = await axios.post(`${API_BASE_URL}/api/transcribe/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })

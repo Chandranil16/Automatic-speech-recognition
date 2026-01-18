@@ -47,7 +47,6 @@ const MetricCard = ({ title, score, grade, description, icon, color, breakdown }
 
       <p className="text-xs text-gray-600 leading-relaxed">{description}</p>
 
-      {/* NEW: Word-level breakdown for accuracy */}
       {breakdown && (
         <div className="mt-4 pt-4 border-t border-gray-200">
           <div className="text-xs text-gray-700 font-medium mb-2">
@@ -296,7 +295,7 @@ const AnalyticsDashboard = ({ analytics }) => {
         <p className="text-gray-600">Comprehensive analysis of your speech patterns and quality</p>
       </div>
 
-      {/* NEW: Quality Warning Banner */}
+      
       {analytics.qualityMetrics && (
         <QualityWarningBanner qualityMetrics={analytics.qualityMetrics} />
       )}

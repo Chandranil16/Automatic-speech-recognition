@@ -85,7 +85,6 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
     console.log("✅ Cleanup complete");
   };
 
-  // Phone-optimized audio processing (less aggressive)
   const setupAdvancedAudioProcessing = (stream) => {
     try {
       audioContextRef.current = new (window.AudioContext ||
@@ -93,40 +92,33 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
       const source = audioContextRef.current.createMediaStreamSource(stream);
 
-      // REDUCED PROCESSING for phone audio
 
-      // 1. MODERATE HIGH-PASS FILTER (allow more low frequencies)
       const highPassFilter = audioContextRef.current.createBiquadFilter();
       highPassFilter.type = "highpass";
-      highPassFilter.frequency.value = 80; // LOWERED from 200Hz
-      highPassFilter.Q.value = 0.5; // Gentler filtering
+      highPassFilter.frequency.value = 80; 
+      highPassFilter.Q.value = 0.5; 
 
-      // 2. MODERATE LOW-PASS FILTER (keep more range)
       const lowPassFilter = audioContextRef.current.createBiquadFilter();
       lowPassFilter.type = "lowpass";
-      lowPassFilter.frequency.value = 8000; // RAISED from 3400Hz
+      lowPassFilter.frequency.value = 8000; 
       lowPassFilter.Q.value = 0.5;
 
-      // 3. LIGHTER COMPRESSION (preserve dynamics)
       const compressor = audioContextRef.current.createDynamicsCompressor();
-      compressor.threshold.value = -40; // HIGHER threshold
-      compressor.knee.value = 20; // Softer knee
-      compressor.ratio.value = 4; // LOWER ratio
-      compressor.attack.value = 0.01; // Slower attack
-      compressor.release.value = 0.25; // Longer release
+      compressor.threshold.value = -40; 
+      compressor.knee.value = 20; 
+      compressor.ratio.value = 4; 
+      compressor.attack.value = 0.01; 
+      compressor.release.value = 0.25; 
 
-      // 4. MODERATE GAIN (don't over-amplify noise)
       gainNodeRef.current = audioContextRef.current.createGain();
-      gainNodeRef.current.gain.value = 2.0; // REDUCED from 3.0
+      gainNodeRef.current.gain.value = 2.0; 
 
-      // 5. ANALYZER
       analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 2048; // REDUCED for less CPU
-      analyserRef.current.smoothingTimeConstant = 0.5; // More smoothing
+      analyserRef.current.fftSize = 2048; 
+      analyserRef.current.smoothingTimeConstant = 0.5; 
       analyserRef.current.minDecibels = -80;
       analyserRef.current.maxDecibels = -20;
 
-      // Connect chain
       source.connect(highPassFilter);
       highPassFilter.connect(lowPassFilter);
       lowPassFilter.connect(compressor);
@@ -171,7 +163,6 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
         const speechRatio = speechEnergy / (totalEnergy || 1);
 
-        // ADAPTIVE GAIN (more moderate for phone)
         if (speechEnergy > 0 && speechEnergy < 80) {
           const targetGain = 2.5;
           gainNodeRef.current.gain.value =
@@ -186,7 +177,6 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
             gainNodeRef.current.gain.value * 0.95 + targetGain * 0.05;
         }
 
-        // RELAXED quality assessment
         let quality = "fair";
         if (speechRatio > 0.25 && speechEnergy > 60) {
           quality = "excellent";
@@ -213,31 +203,26 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
     }
   };
 
-  // Optimized audio constraints for phone compatibility
   const getOptimalAudioConstraints = async () => {
     const constraintSets = [
-      // OPTIMIZED FOR PHONE AUDIO
       {
         audio: {
           sampleRate: { ideal: 48000, min: 16000 },
           channelCount: { ideal: 1 },
 
-          // CRITICAL: Less aggressive processing for phone
           echoCancellation: { ideal: true },
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true },
 
-          // Chrome-specific (gentler)
           googEchoCancellation: { ideal: true },
           googAutoGainControl: { ideal: true },
           googNoiseSuppression: { ideal: true },
-          googHighpassFilter: { ideal: false }, // DISABLE hardware HPF
+          googHighpassFilter: { ideal: false }, 
 
           latency: { ideal: 0.02 },
         },
       },
 
-      // SIMPLE FALLBACK (most compatible)
       {
         audio: {
           sampleRate: 44100,
@@ -248,7 +233,6 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
         },
       },
 
-      // BASIC
       {
         audio: {
           echoCancellation: true,
@@ -256,7 +240,6 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
         },
       },
 
-      // LAST RESORT
       { audio: true },
     ];
 
@@ -312,9 +295,8 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
       streamRef.current = stream;
       setupAdvancedAudioProcessing(stream);
 
-      // IMPORTANT: Use compatible MIME type for phone recordings
       const mimeTypes = [
-        "audio/webm;codecs=opus", // Best for phone
+        "audio/webm;codecs=opus", 
         "audio/webm",
         "audio/ogg;codecs=opus",
         "audio/mp4",
@@ -336,7 +318,7 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
 
       const options = {
         mimeType: selectedMimeType,
-        audioBitsPerSecond: 64000, // REDUCED for phone (was 128000)
+        audioBitsPerSecond: 64000, 
       };
 
       mediaRecorderRef.current = new MediaRecorder(stream, options);
@@ -381,7 +363,6 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
         cleanup();
         setIsRecording(false);
 
-        // LOWERED minimum size for phone recordings
         if (audioBlob.size > 2000) {
           // 2KB minimum
           await sendAudioToServer(audioBlob);
@@ -407,7 +388,6 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
         setLoading(false);
       };
 
-      // IMPORTANT: Larger chunks for phone (more reliable)
       mediaRecorderRef.current.start(500); // 500ms chunks
     } catch (err) {
       console.error("❌ Error starting recording:", err);
@@ -700,24 +680,6 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Audio Tips */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-        {[
-          { icon: "🔇", text: "Optimized for background noise" },
-          { icon: "🗣️", text: "Speak naturally and clearly" },
-          { icon: "⚡", text: "Fast processing with nano model" },
-          { icon: "🌍", text: "Automatic language detection" },
-        ].map((tip, index) => (
-          <div
-            key={index}
-            className="flex items-center space-x-3 bg-white/30 backdrop-blur-sm p-4 rounded-xl border border-white/20"
-          >
-            <span className="text-xl">{tip.icon}</span>
-            <span className="text-gray-700">{tip.text}</span>
-          </div>
-        ))}
       </div>
     </div>
   );

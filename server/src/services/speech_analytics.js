@@ -25,9 +25,7 @@ class SpeechAnalytics {
     ];
   }
 
-  /**
-   * SAFE DIVISION HELPER - Prevents NaN and division by zero
-   */
+ 
   safeDivide(numerator, denominator, defaultValue = 0) {
     if (!denominator || denominator === 0 || !isFinite(denominator)) {
       return defaultValue;
@@ -36,11 +34,8 @@ class SpeechAnalytics {
     return isFinite(result) ? result : defaultValue;
   }
 
-  /**
-   * Calculate comprehensive speech analytics WITH QUALITY ADJUSTMENT
-   */
+  
   analyzeTranscription(transcriptionText, audioMetadata = {}) {
-    // CRITICAL: Validate input first
     if (!transcriptionText || typeof transcriptionText !== "string" || transcriptionText.trim().length === 0) {
       return this.getEmptyAnalytics("No transcription text provided");
     }
@@ -48,17 +43,14 @@ class SpeechAnalytics {
     const words = this.tokenizeWords(transcriptionText);
     const sentences = this.tokenizeSentences(transcriptionText);
 
-    // CRITICAL: Check for empty arrays
     if (words.length === 0) {
       return this.getEmptyAnalytics("No words detected in transcription");
     }
 
-    // If no sentences detected, treat entire text as one sentence
     if (sentences.length === 0) {
       sentences.push(transcriptionText);
     }
 
-    // CRITICAL: Assess transcription quality FIRST
     const qualityMetrics = this.assessTranscriptionQuality(
       transcriptionText,
       words,
@@ -66,7 +58,6 @@ class SpeechAnalytics {
       audioMetadata
     );
 
-    // Calculate base metrics (these should now be more realistic)
     const baseAccuracy = this.calculateAccuracy(transcriptionText, audioMetadata);
     const baseSpeechStrength = this.calculateSpeechStrength(words, sentences);
     const baseClarity = this.calculateClarity(words, sentences, transcriptionText);
@@ -76,7 +67,6 @@ class SpeechAnalytics {
     const tone = this.analyzeTone(transcriptionText);
     const statistics = this.getStatistics(words, sentences, transcriptionText);
 
-    // Apply quality adjustment factor to all metrics
     const qualityFactor = qualityMetrics.overallQualityFactor;
 
     return {
@@ -112,9 +102,7 @@ class SpeechAnalytics {
     };
   }
 
-  /**
-   * Return analytics for empty/invalid transcriptions
-   */
+  
   getEmptyAnalytics(reason) {
     return {
       accuracy: { score: 0, grade: "F", description: reason },
@@ -150,9 +138,7 @@ class SpeechAnalytics {
       const tokenizer = new natural.SentenceTokenizer();
       const sentences = tokenizer.tokenize(text);
 
-      // Handle null or empty result
       if (!sentences || sentences.length === 0) {
-        // Fallback: split by common sentence endings
         const fallbackSentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 0);
         return fallbackSentences.length > 0 ? fallbackSentences : [text];
       }
@@ -160,15 +146,12 @@ class SpeechAnalytics {
       return sentences;
     } catch (error) {
       console.error("Sentence tokenization error:", error);
-      return [text]; // Return entire text as one sentence
+      return [text]; 
     }
   }
 
-  /**
-   * Calculate speech accuracy - MORE REALISTIC SCORING
-   */
+  
   calculateAccuracy(text, metadata) {
-    // BEST: Use word-level confidence if available (MOST ACCURATE)
     if (metadata && metadata.word_confidence_avg && metadata.word_accuracy_distribution) {
       const wordConfidence = metadata.word_confidence_avg * 100;
       const distribution = metadata.word_accuracy_distribution;
@@ -184,7 +167,6 @@ class SpeechAnalytics {
           (distribution.poor * 30)
         ) / totalWords;
         
-        // Show detailed breakdown
         const breakdown = {
           excellentWords: distribution.excellent,
           goodWords: distribution.good,
@@ -205,7 +187,6 @@ class SpeechAnalytics {
       }
     }
 
-    // FALLBACK 1: Use overall API confidence
     if (metadata && metadata.confidence && typeof metadata.confidence === "number") {
       const apiScore = metadata.confidence * 100;
       return {
@@ -216,7 +197,6 @@ class SpeechAnalytics {
       };
     }
 
-    // FALLBACK 2: Heuristic estimation (LEAST RELIABLE)
     let score = 30;
     let penalties = 0;
 
@@ -249,9 +229,6 @@ class SpeechAnalytics {
     };
   }
 
-  /**
-   * NEW: Detailed accuracy description with word-level breakdown
-   */
   getAccuracyDescriptionDetailed(score, breakdown) {
     const total = breakdown.excellentWords + breakdown.goodWords + breakdown.fairWords + breakdown.poorWords;
     const excellentPct = Math.round((breakdown.excellentWords / total) * 100);
@@ -275,9 +252,7 @@ class SpeechAnalytics {
     return description;
   }
 
-  /**
-   * Calculate speech strength - FIXED DIVISION
-   */
+  
   calculateSpeechStrength(words, sentences) {
     const uniqueWords = new Set(words);
     const vocabularyRichness = this.safeDivide(uniqueWords.size, words.length, 0) * 100;
@@ -322,9 +297,6 @@ class SpeechAnalytics {
     };
   }
 
-  /**
-   * Calculate clarity - FIXED DIVISION
-   */
   calculateClarity(words, sentences, text) {
     const syllables = this.countSyllables(words);
     const avgSyllablesPerWord = this.safeDivide(syllables, words.length, 1.5);
@@ -350,9 +322,7 @@ class SpeechAnalytics {
     };
   }
 
-  /**
-   * Calculate fluency - FIXED DIVISION
-   */
+  
   calculateFluency(words, sentences, text) {
     const fillerCount = this.detectFillerWords(text).totalCount;
     const fillerRatio = this.safeDivide(fillerCount, words.length, 0) * 100;
@@ -378,9 +348,7 @@ class SpeechAnalytics {
     };
   }
 
-  /**
-   * Detect filler words - FIXED FOR MULTI-WORD PHRASES
-   */
+  
   detectFillerWords(text) {
     const lowerText = text.toLowerCase();
     const detectedFillers = {};
@@ -389,7 +357,6 @@ class SpeechAnalytics {
     this.fillerWords.forEach((filler) => {
       let regex;
 
-      // Handle multi-word fillers differently
       if (filler.includes(" ")) {
         const escapedFiller = filler.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         regex = new RegExp(escapedFiller, "gi");
@@ -579,7 +546,7 @@ class SpeechAnalytics {
       if (hasQuestionMarks > 0) toneScores.analytical = 1;
 
       if (Object.values(toneScores).every((score) => score === 0)) {
-        toneScores.casual = 1; // Default to casual/neutral
+        toneScores.casual = 1; 
       }
     }
 
@@ -600,16 +567,13 @@ class SpeechAnalytics {
     };
   }
 
-  /**
-   * UPDATED: More realistic quality assessment with ADDITIVE penalties
-   */
+  
   assessTranscriptionQuality(text, words, sentences, metadata) {
     let qualityScore = 100;
-    let penaltyPoints = 0; // Use additive penalties instead of multiplicative
+    let penaltyPoints = 0; 
     const issues = [];
 
-    // 1. Check transcription confidence from API (MOST IMPORTANT)
-    const confidence = (metadata && (metadata.confidence || metadata.original_confidence)) || 0.5; // Default to 50%, not 85%
+    const confidence = (metadata && (metadata.confidence || metadata.original_confidence)) || 0.5; 
 
     if (confidence < 0.5) {
       penaltyPoints += 50;
@@ -622,7 +586,6 @@ class SpeechAnalytics {
       issues.push("Moderate transcription confidence");
     }
 
-    // 2. Check for gibberish/nonsense patterns
     const gibberishPatterns = [
       /^[^a-zA-Z0-9\s]{5,}$/,
       /(.)\1{5,}/,
@@ -635,7 +598,6 @@ class SpeechAnalytics {
       issues.push("Detected garbled or nonsense text");
     }
 
-    // 3. Word length ratio
     const avgWordLength = this.safeDivide(text.length, words.length, 5);
     if (avgWordLength > 15) {
       penaltyPoints += 40;
@@ -645,7 +607,6 @@ class SpeechAnalytics {
       issues.push("Unusually short words (possible fragmentation)");
     }
 
-    // 4. Minimum content check
     if (words.length < 5) {
       penaltyPoints += 50;
       issues.push("Very short transcription (insufficient data)");
@@ -654,7 +615,6 @@ class SpeechAnalytics {
       issues.push("Short transcription (limited analysis)");
     }
 
-    // 5. Sentence structure
     if (sentences.length === 0) {
       penaltyPoints += 40;
       issues.push("No sentence structure detected");
@@ -663,7 +623,6 @@ class SpeechAnalytics {
       issues.push("Extremely long sentences (possible run-on errors)");
     }
 
-    // 6. Repetitive text
     const uniqueWords = new Set(words);
     const repetitionRatio = this.safeDivide(uniqueWords.size, words.length, 1);
     if (repetitionRatio < 0.3) {
@@ -674,7 +633,6 @@ class SpeechAnalytics {
       issues.push("Moderate word repetition");
     }
 
-    // 7. Filler word dominance
     const fillerCount = this.detectFillerWords(text).totalCount;
     const fillerRatio = this.safeDivide(fillerCount, words.length, 0);
     if (fillerRatio > 0.5) {
@@ -685,27 +643,23 @@ class SpeechAnalytics {
       issues.push("High filler word ratio");
     }
 
-    // 8. Capitalization check
     const capitalizedWords = text.match(/\b[A-Z][a-z]+/g) || [];
     if (capitalizedWords.length === 0 && words.length > 10) {
       penaltyPoints += 15;
       issues.push("No capitalization (possible quality issue)");
     }
 
-    // 9. Punctuation check
     const punctuationCount = (text.match(/[.,!?;:]/g) || []).length;
     if (punctuationCount === 0 && sentences.length > 2) {
       penaltyPoints += 10;
       issues.push("No punctuation detected");
     }
 
-    // 10. Language confidence
     if (metadata && metadata.language_confidence && metadata.language_confidence < 0.5) {
       penaltyPoints += 30;
       issues.push("Uncertain language detection");
     }
 
-    // Apply additive penalty
     qualityScore = Math.max(0, qualityScore - penaltyPoints);
     const qualityFactor = Math.max(0.1, Math.min(1.0, qualityScore / 100));
 

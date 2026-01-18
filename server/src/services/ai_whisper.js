@@ -7,22 +7,18 @@ const client = new AssemblyAI({
   apiKey: process.env.ASSEMBLYAI_API_KEY,
 });
 
-/**
- * Calculate realistic confidence based on audio quality
- */
+
 const calculateQualityAdjustedConfidence = (transcript, audioStats) => {
   let baseConfidence = transcript.confidence || 0.75;
 
-  // Adjust based on audio quality indicators
   const audioQualityFactors = {
     fileSizePerSecond: audioStats.size / (transcript.audio_duration || 1),
     wordCount: transcript.text ? transcript.text.split(/\s+/).length : 0,
     duration: transcript.audio_duration || 0,
   };
 
-  let penaltyPoints = 0; // Use additive penalties
+  let penaltyPoints = 0; 
 
-  // Penalties for quality issues
   if (audioQualityFactors.fileSizePerSecond < 6000) {
     penaltyPoints += 10; // Very low bitrate
     console.log("Low audio bitrate detected");
@@ -50,10 +46,9 @@ const calculateQualityAdjustedConfidence = (transcript, audioStats) => {
     console.log("Low-quality transcription pattern detected");
   }
 
-  // Apply additive penalty
   const adjustedConfidence = baseConfidence - penaltyPoints / 100;
 
-  return Math.max(0.2, Math.min(0.98, adjustedConfidence)); // Cap between 20-98%
+  return Math.max(0.2, Math.min(0.98, adjustedConfidence));
 };
 
 const transcribe_audio = async (filepath) => {
@@ -85,21 +80,16 @@ const transcribe_audio = async (filepath) => {
       throw new Error("Audio file too small - may be corrupted");
     }
 
-    // CRITICAL: Enhanced configuration for phone/social media audio
     const transcriptionConfig = {
       audio: fs.createReadStream(filepath),
 
-      // Use NANO model for SPEED (much faster than universal)
       speech_model: "nano",
 
-      // Disable automatic language detection for speed (assume English)
       language_code: "en",
 
-      // Keep essential settings only
       punctuate: true,
       format_text: true,
 
-      // Disable features that slow down transcription
       filter_profanity: false,
       redact_pii: false,
       speaker_labels: false,
@@ -107,7 +97,6 @@ const transcribe_audio = async (filepath) => {
       content_safety: false,
       iab_categories: false,
       
-      // Keep boost settings
       word_boost: [],
       boost_param: "high",
     };
@@ -142,7 +131,6 @@ const transcribe_audio = async (filepath) => {
         );
       }
 
-      // ENHANCED: Calculate word-level accuracy
       const wordLevelData = analyzeWordLevelConfidence(transcript.words || []);
 
       // Calculate quality-adjusted confidence
@@ -179,7 +167,6 @@ const transcribe_audio = async (filepath) => {
         words_count: transcript.text.split(/\s+/).length,
         detected_languages: transcript.language_detection || [],
         
-        // NEW: Word-level accuracy metrics
         word_confidence_avg: wordLevelData.averageConfidence,
         word_confidence_min: wordLevelData.minConfidence,
         word_confidence_max: wordLevelData.maxConfidence,
@@ -207,7 +194,6 @@ const transcribe_audio = async (filepath) => {
       status: error.response?.status,
     });
 
-    // Provide more user-friendly error messages
     if (error.message.includes("API key")) {
       throw new Error("Transcription service configuration error");
     } else if (error.message.includes("file")) {
@@ -229,10 +215,7 @@ const transcribe_audio = async (filepath) => {
   }
 };
 
-/**
- * NEW FUNCTION: Analyze word-level confidence to determine transcription accuracy
- * This gives us per-word accuracy based on how confident the AI is about each word
- */
+
 const analyzeWordLevelConfidence = (words) => {
   if (!words || words.length === 0) {
     return {
@@ -249,15 +232,15 @@ const analyzeWordLevelConfidence = (words) => {
   let totalConfidence = 0;
   let minConfidence = 1.0;
   let maxConfidence = 0.0;
-  let highConfidenceCount = 0; // >0.85
-  let lowConfidenceCount = 0;  // <0.5
+  let highConfidenceCount = 0; 
+  let lowConfidenceCount = 0;  
   const uncertainWords = [];
   
   const distribution = {
-    excellent: 0, // >0.9
-    good: 0,      // 0.75-0.9
-    fair: 0,      // 0.5-0.75
-    poor: 0,      // <0.5
+    excellent: 0, 
+    good: 0,      
+    fair: 0,      
+    poor: 0,      
   };
 
   words.forEach((wordObj) => {
@@ -305,7 +288,7 @@ const analyzeWordLevelConfidence = (words) => {
     highConfidenceCount,
     lowConfidenceCount,
     distribution,
-    uncertainWords: uncertainWords.slice(0, 10), // Top 10 uncertain words
+    uncertainWords: uncertainWords.slice(0, 10), 
   };
 };
 
