@@ -47,7 +47,7 @@ The system supports audio file transcription (WAV only) and live speech recordin
     
 ---
 
-##📌 Current Limitations
+## 📌 Current Limitations
 
 - Only WAV file upload supported
 - Dashboard accuracy depends on current analytics logic (still improving)
@@ -55,7 +55,7 @@ The system supports audio file transcription (WAV only) and live speech recordin
   
 ---
 
-##🔃 Future Improvements
+## 🔃 Future Improvements
 
 - Support for more audio formats (MP3, M4A, etc.)
 - Multi-lingual support for all languages
@@ -68,6 +68,6 @@ The system supports audio file transcription (WAV only) and live speech recordin
   
 ---    
 
-##👤 Author
+## 👤 Author
 
-- Developed with 💖 by myself (Chandranil Adhikary)
+Developed with 💖 by myself (Chandranil Adhikary)
