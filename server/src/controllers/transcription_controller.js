@@ -1,167 +1,142 @@
-const transcribe_audio = require('../services/ai_whisper');
-const fs = require('fs');
-const path = require('path');
-const speechAnalytics = require('../services/speech_analytics');
-
+const fs = require("fs");
+const transcribeAudio = require("../services/ai_whisper");
 const validateFile = (file) => {
   if (!file) {
-    throw new Error('No audio file provided');
+    throw new Error("No audio file provided");
   }
 
-  if (!fs.existsSync(file.path)) {
-    throw new Error('Audio file not found on server');
+  if (!file.path || !fs.existsSync(file.path)) {
+    throw new Error("Audio file not found on server");
   }
 
   const stats = fs.statSync(file.path);
+
   if (stats.size === 0) {
-    throw new Error('Audio file is empty');
+    throw new Error("Audio file is empty");
   }
 
-  if (stats.size < 100) { 
-    throw new Error('Audio file too small - may be corrupted');
+  if (stats.size < 100) {
+    throw new Error("Audio file too small or corrupted");
   }
 
-  console.log('File validation passed:', {
-    path: file.path,
-    size: stats.size,
-    mimetype: file.mimetype,
-    originalname: file.originalname
-  });
-
-  return true;
+  return stats;
 };
 
 const cleanupFile = (filePath) => {
+  if (!filePath) return;
+
   try {
-    if (filePath && fs.existsSync(filePath)) {
+    if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-      console.log('Cleaned up file:', filePath);
     }
-  } catch (cleanupError) {
-    console.error('Error cleaning up file:', cleanupError);
+  } catch (error) {
+    console.error("Failed to clean up uploaded file:", error.message);
   }
 };
 
-const transcribe_upload_file = async (req, res, next) => {
+const getErrorMessage = (error) => {
+  return error instanceof Error ? error.message : String(error);
+};
+
+const getStatusCode = (message) => {
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes("no audio") ||
+    normalizedMessage.includes("no speech") ||
+    normalizedMessage.includes("no clear speech") ||
+    normalizedMessage.includes("not found") ||
+    normalizedMessage.includes("empty") ||
+    normalizedMessage.includes("too small") ||
+    normalizedMessage.includes("format")
+  ) {
+    return 400;
+  }
+
+  if (normalizedMessage.includes("too many requests")) {
+    return 429;
+  }
+
+  if (
+    normalizedMessage.includes("temporarily unavailable") ||
+    normalizedMessage.includes("timeout")
+  ) {
+    return 503;
+  }
+
+  return 500;
+};
+
+const processTranscription = async (req, res, mode) => {
   let filePath = null;
-  
+
   try {
-    validateFile(req.file);
+    const fileStats = validateFile(req.file);
     filePath = req.file.path;
 
-    console.log('Starting file transcription:', {
-      path: filePath,
-      size: req.file.size,
-      mimetype: req.file.mimetype,
-      originalname: req.file.originalname
-    });
+    const result = await transcribeAudio(filePath);
+    const metadata = result && typeof result === "object" ? result : {};
+    const text = typeof result === "string" ? result : metadata.text;
 
-    // Get transcription with metadata
-    const result = await transcribe_audio(filePath);
-    const text = typeof result === 'string' ? result : result.text;
-    const metadata = typeof result === 'object' ? result : {};
-    
     if (!text || text.trim().length === 0) {
-      throw new Error('No transcription text returned - audio may be silent or unclear');
+      throw new Error(
+        mode === "stream"
+          ? "No clear speech detected"
+          : "No transcription text returned",
+      );
     }
 
-    // Calculate analytics
-    const analytics = speechAnalytics.analyzeTranscription(text, metadata);
+    const responseMetadata = {
+      duration: metadata.audio_duration ?? null,
+      language: metadata.language_code ?? "auto-detected",
+      confidence: metadata.confidence ?? null,
+    };
 
-
-    cleanupFile(filePath);
-    
-    res.json({ 
-      text,
-      analytics,
-      metadata: {
-        fileSize: req.file.size,
-        fileName: req.file.originalname,
-        duration: null,
-        language: metadata.language_code || 'auto-detected'
-      }
+    res.status(200).json({
+      text: text.trim(),
+      metadata: responseMetadata,
     });
-    
   } catch (error) {
-    console.error('Error during transcription:', error);
+  const message =
+    error instanceof Error ? error.message : String(error);
+
+  const statusCode = getStatusCode(message);
+  const normalizedMessage = message.toLowerCase();
+
+  const userMessage =
+    mode === "stream" &&
+    (normalizedMessage.includes("no speech") ||
+      normalizedMessage.includes("no clear speech"))
+      ? "No clear speech detected. Try recording without background noise."
+      : message;
+
+  console.error("Transcription error:", {
+    mode,
+    message,
+    filePath,
+  });
+
+  res.status(statusCode).json({
+    error: userMessage,
+    details:
+      process.env.NODE_ENV === "development"
+        ? message
+        : undefined,
+  });
+} finally {
     cleanupFile(filePath);
-    
-    const errorMessage = error.message.includes('AssemblyAI') 
-      ? 'Transcription service error - please try again'
-      : error.message.includes('file') 
-        ? 'File processing error - please check your audio file'
-        : 'Transcription failed - please try again with clearer audio';
-    
-    res.status(500).json({ 
-      error: errorMessage,
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
   }
 };
 
-const transcribe_stream = async (req, res, next) => {
-  let filePath = null;
-  
-  try {
-    validateFile(req.file);
-    filePath = req.file.path;
+const transcribeUploadFile = (req, res) => {
+  return processTranscription(req, res, "upload");
+};
 
-    console.log('🎬 Processing stream transcription:', {
-      path: filePath,
-      size: req.file.size,
-      sizeKB: Math.round(req.file.size / 1024),
-      mimetype: req.file.mimetype,
-    });
-
-    const result = await transcribe_audio(filePath);
-    const text = typeof result === 'string' ? result : result.text;
-    const metadata = typeof result === 'object' ? result : {};
-    
-    if (!text || text.trim().length === 0) {
-      throw new Error('No speech detected - audio may contain only music/noise');
-    }
-
-    // Calculate analytics
-    const analytics = speechAnalytics.analyzeTranscription(text, metadata);
-
-    cleanupFile(filePath);
-    
-    res.json({ 
-      text,
-      analytics,
-      metadata: {
-        language: metadata.language_code || 'auto-detected',
-        duration: metadata.audio_duration,
-        confidence: metadata.confidence,
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Stream transcription error:', error);
-    cleanupFile(filePath);
-    
-    let errorMessage = 'Transcription failed';
-    
-    if (error.message.includes('music') || error.message.includes('noise')) {
-      errorMessage = 'No clear speech detected. Try recording without background music/noise.';
-    } else if (error.message.includes('timeout')) {
-      errorMessage = 'Processing took too long. Try recording shorter clips.';
-    } else if (error.message.includes('format')) {
-      errorMessage = 'Audio format not supported. Try different recording method.';
-    } else if (error.message.includes('AssemblyAI')) {
-      errorMessage = 'Transcription service error. Please try again.';
-    } else {
-      errorMessage = error.message || 'Server error - please try again.';
-    }
-    
-    res.status(500).json({ 
-      error: errorMessage,
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
+const transcribeStream = (req, res) => {
+  return processTranscription(req, res, "stream");
 };
 
 module.exports = {
-  transcribe_upload_file,
-  transcribe_stream,
+  transcribe_upload_file: transcribeUploadFile,
+  transcribe_stream: transcribeStream,
 };

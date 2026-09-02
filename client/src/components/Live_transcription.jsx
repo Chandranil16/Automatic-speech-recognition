@@ -1,34 +1,172 @@
-import React, { useState, useRef, useEffect } from "react";
-import axios from "axios";
+import React, { useEffect, useRef, useState } from "react";
 import API_BASE_URL from "../config/api";
 
-const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [error, setError] = useState("");
-  const [recordingTime, setRecordingTime] = useState(0);
-  const [audioLevel, setAudioLevel] = useState(0);
-  const [audioQuality, setAudioQuality] = useState("checking");
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const timerRef = useRef(null);
-  const streamRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const animationFrameRef = useRef(null);
-  const gainNodeRef = useRef(null);
+const getWebSocketUrl = () => {
+  const url = new URL(API_BASE_URL);
 
-  useEffect(() => {
-    if (isRecording) {
-      timerRef.current = setInterval(() => {
-        setRecordingTime((prev) => prev + 1);
-      }, 1000);
-    } else {
-      clearInterval(timerRef.current);
-      setRecordingTime(0);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/live-transcription";
+
+  return url.toString();
+};
+
+const downsampleAudio = (buffer, inputSampleRate, outputSampleRate) => {
+  if (inputSampleRate === outputSampleRate) {
+    return buffer;
+  }
+
+  if (inputSampleRate < outputSampleRate) {
+    throw new Error("Input audio sample rate is lower than output sample rate");
+  }
+
+  const sampleRateRatio = inputSampleRate / outputSampleRate;
+
+  const outputLength = Math.round(buffer.length / sampleRateRatio);
+
+  const output = new Float32Array(outputLength);
+
+  let outputIndex = 0;
+  let inputIndex = 0;
+
+  while (outputIndex < output.length) {
+    const nextInputIndex = Math.round((outputIndex + 1) * sampleRateRatio);
+
+    let total = 0;
+    let count = 0;
+
+    for (
+      let index = inputIndex;
+      index < nextInputIndex && index < buffer.length;
+      index += 1
+    ) {
+      total += buffer[index];
+      count += 1;
     }
 
-    return () => clearInterval(timerRef.current);
-  }, [isRecording]);
+    output[outputIndex] = count > 0 ? total / count : 0;
+
+    outputIndex += 1;
+    inputIndex = nextInputIndex;
+  }
+
+  return output;
+};
+
+const convertToPcm16 = (audioData) => {
+  const pcmData = new Int16Array(audioData.length);
+
+  for (let index = 0; index < audioData.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, audioData[index]));
+
+    pcmData[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+
+  return pcmData;
+};
+
+const arrayBufferToBase64 = (arrayBuffer) => {
+  const bytes = new Uint8Array(arrayBuffer);
+
+  const chunkSize = 0x8000;
+
+  let binary = "";
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return window.btoa(binary);
+};
+
+const LiveTranscription = ({ transcription, setTranscription, setLoading }) => {
+  const [isRecording, setIsRecording] = useState(false);
+
+  const [recordingTime, setRecordingTime] = useState(0);
+
+  const [audioLevel, setAudioLevel] = useState(0);
+
+  const [error, setError] = useState("");
+
+  const [interimTranscript, setInterimTranscript] = useState("");
+
+  const socketRef = useRef(null);
+
+  const streamRef = useRef(null);
+
+  const audioContextRef = useRef(null);
+
+  const processorRef = useRef(null);
+
+  const sourceRef = useRef(null);
+
+  const timerRef = useRef(null);
+
+  const recordingRef = useRef(false);
+
+  const liveReadyRef = useRef(false);
+
+  const cleanup = () => {
+    recordingRef.current = false;
+
+    liveReadyRef.current = false;
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+
+      timerRef.current = null;
+    }
+
+    if (processorRef.current) {
+      processorRef.current.onaudioprocess = null;
+
+      processorRef.current.disconnect();
+
+      processorRef.current = null;
+    }
+
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+
+      sourceRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state !== "closed") {
+        audioContextRef.current.close();
+      }
+
+      audioContextRef.current = null;
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
+        track.stop();
+      });
+
+      streamRef.current = null;
+    }
+
+    const socket = socketRef.current;
+
+    if (socket) {
+      if (
+        socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING
+      ) {
+        socket.close();
+      }
+
+      socketRef.current = null;
+    }
+
+    setAudioLevel(0);
+
+    setIsRecording(false);
+
+    setInterimTranscript("");
+  };
 
   useEffect(() => {
     return () => {
@@ -36,648 +174,352 @@ const LiveTranscription = ({ setTranscription, setAnalytics, setLoading }) => {
     };
   }, []);
 
-  const cleanup = () => {
-    console.log("🧹 Cleaning up audio resources...");
-
-    if (
-      mediaRecorderRef.current &&
-      mediaRecorderRef.current.state === "recording"
-    ) {
-      mediaRecorderRef.current.stop();
-    }
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        track.stop();
-        console.log("Stopped track:", track.kind);
-      });
-      streamRef.current = null;
-    }
-
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close();
-      console.log("Closed audio context");
-      audioContextRef.current = null;
-    }
-
-    clearInterval(timerRef.current);
-    timerRef.current = null;
-
-    if (analyserRef.current) {
-      analyserRef.current.disconnect();
-      analyserRef.current = null;
-    }
-
-    if (gainNodeRef.current) {
-      gainNodeRef.current.disconnect();
-      gainNodeRef.current = null;
-    }
-
-    setAudioQuality("checking");
-    setAudioLevel(0);
-    setIsRecording(false);
-
-    console.log("✅ Cleanup complete");
-  };
-
-  const setupAdvancedAudioProcessing = (stream) => {
+  const startRecording = async () => {
     try {
-      audioContextRef.current = new (window.AudioContext ||
-        window.webkitAudioContext)();
+      setError("");
 
-      const source = audioContextRef.current.createMediaStreamSource(stream);
+      setLoading(true);
 
+      setTranscription("");
 
-      const highPassFilter = audioContextRef.current.createBiquadFilter();
-      highPassFilter.type = "highpass";
-      highPassFilter.frequency.value = 80; 
-      highPassFilter.Q.value = 0.5; 
+      setInterimTranscript("");
 
-      const lowPassFilter = audioContextRef.current.createBiquadFilter();
-      lowPassFilter.type = "lowpass";
-      lowPassFilter.frequency.value = 8000; 
-      lowPassFilter.Q.value = 0.5;
+      setRecordingTime(0);
 
-      const compressor = audioContextRef.current.createDynamicsCompressor();
-      compressor.threshold.value = -40; 
-      compressor.knee.value = 20; 
-      compressor.ratio.value = 4; 
-      compressor.attack.value = 0.01; 
-      compressor.release.value = 0.25; 
+      liveReadyRef.current = false;
 
-      gainNodeRef.current = audioContextRef.current.createGain();
-      gainNodeRef.current.gain.value = 2.0; 
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Microphone access is not supported by this browser");
+      }
 
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 2048; 
-      analyserRef.current.smoothingTimeConstant = 0.5; 
-      analyserRef.current.minDecibels = -80;
-      analyserRef.current.maxDecibels = -20;
+      if (!window.WebSocket) {
+        throw new Error("WebSocket is not supported by this browser");
+      }
 
-      source.connect(highPassFilter);
-      highPassFilter.connect(lowPassFilter);
-      lowPassFilter.connect(compressor);
-      compressor.connect(gainNodeRef.current);
-      gainNodeRef.current.connect(analyserRef.current);
+      const webSocketUrl = getWebSocketUrl();
 
-      console.log("✅ Phone-optimized audio processing initialized:", {
-        highPass: "80Hz",
-        lowPass: "8000Hz",
-        compression: "4:1 ratio",
-        gain: "2.0x initial",
+      console.log("Connecting to WebSocket:", webSocketUrl);
+
+      const socket = new WebSocket(webSocketUrl);
+
+      socketRef.current = socket;
+
+      await new Promise((resolve, reject) => {
+        const socketTimeout = setTimeout(() => {
+          reject(new Error("Live transcription connection timed out"));
+        }, 15000);
+
+        socket.onopen = () => {
+          console.log("Browser WebSocket connected");
+        };
+
+        socket.onerror = (socketError) => {
+          console.error("WebSocket error:", socketError);
+
+          clearTimeout(socketTimeout);
+
+          reject(new Error("Could not connect to live transcription"));
+        };
+
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+
+            console.log("Message from backend:", message);
+
+            if (message.type === "ready") {
+              clearTimeout(socketTimeout);
+
+              liveReadyRef.current = true;
+
+              console.log("Gemini Live is ready");
+
+              resolve();
+
+              return;
+            }
+
+            /* Interim / partial transcription.*/
+
+            if (message.type === "interim_transcript" && message.text) {
+              console.log("Interim transcript:", message.text);
+
+              setInterimTranscript(message.text);
+
+              return;
+            }
+
+            /* Final transcription.*/
+
+            if (message.type === "transcript" && message.text) {
+              console.log("Final transcript:", message.text);
+
+              setTranscription((previousText) =>
+                `${previousText} ${message.text}`.trim(),
+              );
+
+              setInterimTranscript("");
+
+              return;
+            }
+
+            if (message.type === "error") {
+              clearTimeout(socketTimeout);
+
+              reject(new Error(message.message || "Live transcription error"));
+            }
+          } catch (socketError) {
+            console.error("Invalid WebSocket response:", socketError);
+          }
+        };
       });
 
-      const frequencyData = new Uint8Array(
-        analyserRef.current.frequencyBinCount
-      );
+      socket.onclose = () => {
+        console.log("Browser WebSocket closed");
 
-      const processAudio = () => {
-        if (!isRecording) return;
+        if (recordingRef.current) {
+          setError("Live transcription connection closed.");
 
-        analyserRef.current.getByteFrequencyData(frequencyData);
-
-        // RELAXED quality assessment for phone audio
-        const sampleRate = audioContextRef.current.sampleRate;
-        const nyquist = sampleRate / 2;
-        const binSize = nyquist / frequencyData.length;
-
-        const speechStart = Math.floor(150 / binSize); // Wider range
-        const speechEnd = Math.floor(4000 / binSize);
-
-        let speechEnergy = 0;
-        let totalEnergy = 0;
-
-        for (let i = 0; i < frequencyData.length; i++) {
-          const energy = frequencyData[i];
-          totalEnergy += energy;
-
-          if (i >= speechStart && i <= speechEnd) {
-            speechEnergy += energy;
-          }
+          cleanup();
         }
-
-        const speechRatio = speechEnergy / (totalEnergy || 1);
-
-        if (speechEnergy > 0 && speechEnergy < 80) {
-          const targetGain = 2.5;
-          gainNodeRef.current.gain.value =
-            gainNodeRef.current.gain.value * 0.95 + targetGain * 0.05;
-        } else if (speechEnergy < 150) {
-          const targetGain = 2.0;
-          gainNodeRef.current.gain.value =
-            gainNodeRef.current.gain.value * 0.95 + targetGain * 0.05;
-        } else {
-          const targetGain = 1.5;
-          gainNodeRef.current.gain.value =
-            gainNodeRef.current.gain.value * 0.95 + targetGain * 0.05;
-        }
-
-        let quality = "fair";
-        if (speechRatio > 0.25 && speechEnergy > 60) {
-          quality = "excellent";
-        } else if (speechRatio > 0.15 && speechEnergy > 40) {
-          quality = "good";
-        } else if (speechEnergy > 20) {
-          quality = "fair";
-        } else {
-          quality = "poor";
-        }
-
-        setAudioQuality(quality);
-
-        const speechLevel = Math.min(100, (speechEnergy / 80) * 100);
-        setAudioLevel(speechLevel);
-
-        animationFrameRef.current = requestAnimationFrame(processAudio);
       };
 
-      processAudio();
-    } catch (err) {
-      console.error("❌ Audio processing failed:", err);
-      setAudioQuality("basic");
-    }
-  };
-
-  const getOptimalAudioConstraints = async () => {
-    const constraintSets = [
-      {
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: { ideal: 48000, min: 16000 },
-          channelCount: { ideal: 1 },
-
-          echoCancellation: { ideal: true },
-          noiseSuppression: { ideal: true },
-          autoGainControl: { ideal: true },
-
-          googEchoCancellation: { ideal: true },
-          googAutoGainControl: { ideal: true },
-          googNoiseSuppression: { ideal: true },
-          googHighpassFilter: { ideal: false }, 
-
-          latency: { ideal: 0.02 },
-        },
-      },
-
-      {
-        audio: {
-          sampleRate: 44100,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
         },
-      },
+      });
 
-      {
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      },
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
 
-      { audio: true },
-    ];
-
-    for (let i = 0; i < constraintSets.length; i++) {
-      try {
-        const testStream = await navigator.mediaDevices.getUserMedia(
-          constraintSets[i]
-        );
-        const track = testStream.getAudioTracks()[0];
-
-        if (track) {
-          const settings = track.getSettings();
-          console.log(`✅ Audio setup (attempt ${i + 1}):`, {
-            sampleRate: settings.sampleRate,
-            channelCount: settings.channelCount,
-            echoCancellation: settings.echoCancellation,
-            noiseSuppression: settings.noiseSuppression,
-            autoGainControl: settings.autoGainControl,
-            latency: settings.latency,
-          });
-
-          testStream.getTracks().forEach((track) => track.stop());
-          return constraintSets[i];
-        }
-
-        testStream.getTracks().forEach((track) => track.stop());
-      } catch (err) {
-        console.warn(`⚠️ Attempt ${i + 1} failed:`, err.message);
-        continue;
+      if (!AudioContext) {
+        throw new Error("Audio processing is not supported by this browser");
       }
-    }
 
-    throw new Error("Unable to access microphone");
-  };
+      const audioContext = new AudioContext();
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs
-      .toString()
-      .padStart(2, "0")}`;
-  };
+      await audioContext.resume();
 
-  const startRecording = async () => {
-    try {
-      setError("");
-      setLoading(true);
-      setAudioQuality("initializing");
+      console.log("Microphone sample rate:", audioContext.sampleRate);
 
-      const constraints = await getOptimalAudioConstraints();
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const source = audioContext.createMediaStreamSource(stream);
+
+      const analyser = audioContext.createAnalyser();
+
+      analyser.fftSize = 1024;
+
+      analyser.smoothingTimeConstant = 0.7;
+
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      source.connect(analyser);
+
+      source.connect(processor);
+
+      const muteGain = audioContext.createGain();
+
+      muteGain.gain.value = 0;
+
+      processor.connect(muteGain);
+
+      muteGain.connect(audioContext.destination);
 
       streamRef.current = stream;
-      setupAdvancedAudioProcessing(stream);
 
-      const mimeTypes = [
-        "audio/webm;codecs=opus", 
-        "audio/webm",
-        "audio/ogg;codecs=opus",
-        "audio/mp4",
-        "audio/wav",
-      ];
+      audioContextRef.current = audioContext;
 
-      let selectedMimeType = "";
-      for (const type of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(type)) {
-          selectedMimeType = type;
-          console.log("📱 Using MIME type:", type);
-          break;
-        }
-      }
+      sourceRef.current = source;
 
-      if (!selectedMimeType) {
-        selectedMimeType = "audio/webm";
-      }
+      processorRef.current = processor;
 
-      const options = {
-        mimeType: selectedMimeType,
-        audioBitsPerSecond: 64000, 
-      };
+      recordingRef.current = true;
 
-      mediaRecorderRef.current = new MediaRecorder(stream, options);
-      audioChunksRef.current = [];
-
-      let totalChunks = 0;
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-          totalChunks++;
-          if (totalChunks % 5 === 0) {
-            console.log(`📦 Recorded ${totalChunks} chunks, total size: ${
-              audioChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0)
-            } bytes`);
-          }
-        }
-      };
-
-      mediaRecorderRef.current.onstop = async () => {
-        console.log("🎬 Processing recording...");
-
-        if (audioChunksRef.current.length === 0) {
-          setError(
-            "No audio captured. Please check microphone and speak louder."
-          );
-          setLoading(false);
+      processor.onaudioprocess = (event) => {
+        if (
+          !recordingRef.current ||
+          !liveReadyRef.current ||
+          socket.readyState !== WebSocket.OPEN
+        ) {
           return;
         }
 
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: selectedMimeType,
-        });
+        const inputData = event.inputBuffer.getChannelData(0);
 
-        console.log("📦 Audio blob created:", {
-          size: audioBlob.size,
-          sizeKB: Math.round(audioBlob.size / 1024),
-          type: audioBlob.type,
-          chunks: audioChunksRef.current.length,
-          quality: audioQuality,
-        });
+        const inputSampleRate = audioContext.sampleRate;
 
-        cleanup();
-        setIsRecording(false);
+        const pcmData = downsampleAudio(inputData, inputSampleRate, 16000);
 
-        if (audioBlob.size > 2000) {
-          // 2KB minimum
-          await sendAudioToServer(audioBlob);
-        } else {
-          setError(
-            "Recording too short or silent. Please speak clearly and try again."
-          );
-          setLoading(false);
+        const pcm16 = convertToPcm16(pcmData);
+
+        socket.send(
+          JSON.stringify({
+            type: "audio",
+
+            data: arrayBufferToBase64(pcm16.buffer),
+          }),
+        );
+
+        let total = 0;
+
+        for (const sample of inputData) {
+          total += sample * sample;
         }
+
+        const rms = Math.sqrt(total / inputData.length);
+
+        setAudioLevel(Math.min(100, Math.round(rms * 300)));
       };
 
-      mediaRecorderRef.current.onerror = (event) => {
-        console.error("❌ Recording error:", event.error);
-        setError("Recording failed. Please try again.");
-        setIsRecording(false);
-        setLoading(false);
-        cleanup();
-      };
+      setIsRecording(true);
 
-      mediaRecorderRef.current.onstart = () => {
-        console.log("🎙️ Recording started");
-        setIsRecording(true);
-        setLoading(false);
-      };
-
-      mediaRecorderRef.current.start(500); // 500ms chunks
-    } catch (err) {
-      console.error("❌ Error starting recording:", err);
-      let errorMessage = "Failed to start recording. ";
-
-      if (err.name === "NotAllowedError") {
-        errorMessage +=
-          "Please allow microphone access in your browser settings.";
-      } else if (err.name === "NotFoundError") {
-        errorMessage += "No microphone detected. Please check your device.";
-      } else if (err.name === "NotReadableError") {
-        errorMessage +=
-          "Microphone is busy. Close other apps using the microphone.";
-      } else {
-        errorMessage += err.message || "Please check your microphone and try again.";
-      }
-
-      setError(errorMessage);
       setLoading(false);
+
+      timerRef.current = setInterval(() => {
+        setRecordingTime((previousTime) => previousTime + 1);
+      }, 1000);
+    } catch (startError) {
+      console.error("Unable to start live transcription:", startError);
+
       cleanup();
+
+      setLoading(false);
+
+      if (startError.name === "NotAllowedError") {
+        setError(
+          "Microphone permission was denied. Please allow microphone access and try again.",
+        );
+      } else if (startError.name === "NotFoundError") {
+        setError("No microphone was found.");
+      } else {
+        setError(startError.message || "Unable to start live transcription.");
+      }
     }
   };
 
   const stopRecording = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
+    recordingRef.current = false;
 
-    if (
-      mediaRecorderRef.current &&
-      mediaRecorderRef.current.state === "recording"
-    ) {
-      console.log("⏹️ Stopping recording...");
-      mediaRecorderRef.current.stop();
-    } else {
-      cleanup();
-      setIsRecording(false);
-    }
-  };
+    setIsRecording(false);
 
-  const sendAudioToServer = async (audioBlob) => {
-    const formData = new FormData();
+    setLoading(true);
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `recording-${timestamp}.webm`;
+    const socket = socketRef.current;
 
-    formData.append("audio", audioBlob, filename);
-    formData.append("mimeType", audioBlob.type);
-    formData.append("size", audioBlob.size.toString());
-    formData.append("quality", audioQuality);
+    if (socket?.readyState === WebSocket.OPEN) {
+      console.log("Sending stop signal");
 
-    try {
-      console.log("📤 Sending audio for transcription:", {
-        filename,
-        size: audioBlob.size,
-        sizeKB: Math.round(audioBlob.size / 1024),
-        type: audioBlob.type,
-        quality: audioQuality,
-      });
-
-      const response = await axios.post(
-        `${API_BASE_URL}/api/transcribe/stream`,
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-          timeout: 120000, // 2 minutes
-          onUploadProgress: (progressEvent) => {
-            const percentCompleted = Math.round(
-              (progressEvent.loaded * 100) / progressEvent.total
-            );
-            if (percentCompleted % 20 === 0) {
-              console.log(`📊 Upload progress: ${percentCompleted}%`);
-            }
-          },
-        }
+      socket.send(
+        JSON.stringify({
+          type: "stop",
+        }),
       );
 
-      console.log("✅ Transcription response received:", {
-        textLength: response.data.text?.length,
-        hasAnalytics: !!response.data.analytics,
-      });
+      setTimeout(() => {
+        cleanup();
 
-      if (response.data && response.data.text) {
-        setTranscription(response.data.text);
+        setLoading(false);
+      }, 2000);
+    } else {
+      cleanup();
 
-        // Handle analytics from response
-        if (setAnalytics && response.data.analytics) {
-          setAnalytics(response.data.analytics);
-        }
-      } else {
-        setError(
-          "No speech detected in audio. Please speak more clearly or check background noise."
-        );
-      }
-    } catch (err) {
-      console.error("❌ Transcription error:", err);
-      let errorMessage = "Transcription failed. ";
-
-      if (err.code === "ECONNABORTED") {
-        errorMessage +=
-          "Request timed out - audio may be too long. Try shorter recordings.";
-      } else if (err.response?.status >= 500) {
-        errorMessage += "Server error - please try again in a moment.";
-      } else if (err.response?.status === 400) {
-        errorMessage +=
-          "Audio format not supported. Try using a different device or browser.";
-      } else if (err.response?.data?.error) {
-        errorMessage = err.response.data.error;
-      } else {
-        errorMessage +=
-          "Please try recording again with less background noise.";
-      }
-
-      setError(errorMessage);
-    } finally {
       setLoading(false);
     }
   };
 
+  const formatTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+
+    const remainingSeconds = seconds % 60;
+
+    return `${String(minutes).padStart(2, "0")}:${String(
+      remainingSeconds,
+    ).padStart(2, "0")}`;
+  };
+
   return (
     <div className="space-y-8 animate-fade-in">
-      {/* Recording Interface */}
       <div className="glass neomorph-inset rounded-3xl p-12 text-center">
-        <div className="flex justify-center mb-8">
-          <div className="relative z-10">
-            <button
-              className={`
-                w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300 transform relative z-20
-                ${
-                  isRecording
-                    ? "bg-gradient-to-r from-red-500 to-pink-500 shadow-2xl shadow-red-500/50"
-                    : "bg-gradient-to-r from-indigo-500 to-purple-500 hover:scale-110 shadow-2xl"
-                }
-                focus:outline-none focus:ring-4 focus:ring-blue-300 active:scale-95
-                disabled:opacity-50 disabled:cursor-not-allowed
-              `}
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={false}
-              type="button"
-            >
-              {isRecording ? (
-                <svg
-                  className="w-12 h-12 text-white"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="w-12 h-12 text-white"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              )}
-            </button>
+        {/* RECORD / STOP BUTTON */}
 
-            {isRecording && (
-              <div className="absolute inset-0 rounded-full border-4 border-red-400 animate-ping opacity-75"></div>
-            )}
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={isRecording ? stopRecording : startRecording}
+          className={`w-32 h-32 rounded-full text-white text-lg font-semibold transition ${
+            isRecording
+              ? "bg-red-600 hover:bg-red-700"
+              : "bg-indigo-600 hover:bg-indigo-700"
+          }`}
+        >
+          {isRecording ? "Stop" : "Record"}
+        </button>
 
-        {/* Status Display */}
-        <div className="space-y-4">
-          <h3 className="text-2xl font-semibold text-gray-800">
-            {isRecording ? "Recording..." : "Ready to Record"}
-          </h3>
+        {/* STATUS */}
 
-          {isRecording && (
-            <div className="bg-red-50/80 backdrop-blur border border-red-200 text-red-700 px-6 py-3 rounded-2xl inline-block">
-              <div className="flex items-center space-x-4">
-                <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-                <span className="font-mono text-lg font-semibold">
-                  {formatTime(recordingTime)}
-                </span>
+        <h3 className="mt-8 text-2xl font-semibold text-gray-800">
+          {isRecording ? "Listening..." : "Ready to record"}
+        </h3>
 
-                {/* Audio Quality Indicator */}
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs font-medium">Quality:</span>
-                  <span
-                    className={`text-xs font-bold px-2 py-1 rounded ${
-                      audioQuality === "excellent"
-                        ? "bg-green-200 text-green-800"
-                        : audioQuality === "good"
-                        ? "bg-blue-200 text-blue-800"
-                        : audioQuality === "fair"
-                        ? "bg-yellow-200 text-yellow-800"
-                        : audioQuality === "poor"
-                        ? "bg-red-200 text-red-800"
-                        : "bg-gray-200 text-gray-800"
-                    }`}
-                  >
-                    {audioQuality.toUpperCase()}
-                  </span>
-                </div>
+        {/* RECORDING DETAILS */}
 
-                {/* Audio Level */}
-                {audioLevel > 0 && (
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xs">Level:</span>
-                    <div className="w-20 h-2 bg-gray-300 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-150 ${
-                          audioLevel > 60
-                            ? "bg-green-500"
-                            : audioLevel > 30
-                            ? "bg-yellow-500"
-                            : "bg-red-500"
-                        }`}
-                        style={{ width: `${Math.min(100, audioLevel)}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                )}
-              </div>
+        {isRecording && (
+          <>
+            {/* TIMER */}
+
+            <p className="mt-4 font-mono text-lg text-red-700">
+              {formatTime(recordingTime)}
+            </p>
+
+            {/* AUDIO LEVEL */}
+
+            <div className="mx-auto mt-6 h-3 max-w-xs overflow-hidden rounded-full bg-gray-200">
+              <div
+                className="h-full bg-indigo-600 transition-all duration-100"
+                style={{
+                  width: `${audioLevel}%`,
+                }}
+              />
             </div>
-          )}
 
-          <p className="text-gray-600 max-w-md mx-auto">
-            {isRecording
-              ? "Speak clearly. Optimized for phone and noisy environments."
-              : "Click to start recording with phone-optimized processing"}
-          </p>
-        </div>
-
-        {error && (
-          <div className="mt-6 bg-red-50/80 backdrop-blur border border-red-200 text-red-700 px-6 py-4 rounded-2xl">
-            <div className="flex items-center justify-center space-x-2">
-              <svg
-                className="w-5 h-5 flex-shrink-0"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span className="text-sm">{error}</span>
-            </div>
-          </div>
+            <p className="mt-4 text-gray-600">
+              Speak now. Your transcript will appear live.
+            </p>
+          </>
         )}
 
-        {/* Enhanced Audio Visualization */}
-        {isRecording && (
-          <div className="mt-8">
-            <div className="flex justify-center items-end space-x-1 h-24 mb-4">
-              {[...Array(16)].map((_, i) => (
-                <div
-                  key={i}
-                  className={`w-2 rounded-full transition-all duration-200 ${
-                    audioLevel > 20
-                      ? "bg-gradient-to-t from-indigo-500 to-purple-500"
-                      : "bg-gray-300"
-                  }`}
-                  style={{
-                    height: `${Math.max(
-                      8,
-                      (audioLevel / 100) * 96 +
-                        Math.sin(Date.now() / 200 + i) * 10
-                    )}px`,
-                    opacity: audioLevel > 10 ? 1 : 0.3,
-                  }}
-                ></div>
-              ))}
-            </div>
+        {/* ERROR */}
 
-            {/* Real-time feedback */}
-            <div className="text-sm text-gray-600">
-              {audioQuality === "excellent" && "🎯 Crystal clear audio detected"}
-              {audioQuality === "good" && "✅ Good audio quality"}
-              {audioQuality === "fair" && "⚠️ Speak a bit louder or closer"}
-              {audioQuality === "poor" && "📢 Please speak louder and clearer"}
-              {audioQuality === "checking" && "🔍 Analyzing audio quality..."}
-              {audioQuality === "initializing" && "⚡ Starting phone-optimized recording..."}
-            </div>
+        {error && (
+          <p className="mt-6 rounded-lg bg-red-100 p-4 text-red-700">{error}</p>
+        )}
+
+        {/* LIVE TRANSCRIPTION DISPLAY */}
+
+        {(transcription || interimTranscript) && (
+          <div className="mx-auto mt-10 max-w-3xl rounded-2xl bg-white p-6 text-left shadow-lg">
+            <h4 className="mb-4 text-lg font-semibold text-gray-800">
+              Live Transcription
+            </h4>
+
+            <p className="whitespace-pre-wrap leading-7 text-gray-700">
+              {/* FINAL TRANSCRIPT */}
+
+              {transcription}
+
+              {/* INTERIM TRANSCRIPT */}
+
+              {interimTranscript && (
+                <span className="ml-2 text-gray-400">{interimTranscript}</span>
+              )}
+            </p>
+
+            {isRecording && (
+              <p className="mt-4 text-sm text-indigo-500">
+                ● Live transcription active
+              </p>
+            )}
           </div>
         )}
       </div>

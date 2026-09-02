@@ -3,18 +3,22 @@
 
 @layer base {
   * {
-    @apply antialiased;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
     font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
-    @apply bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 min-h-screen;
+    background: linear-gradient(to bottom right, #f8fafc, #eff6ff, #eef2ff);
+    min-height: 100vh;
   }
 }
 
 @layer components {
   .glass {
-    @apply bg-white/10 backdrop-blur-md border border-white/20;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
   }
 
   .neomorph {
